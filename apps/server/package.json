@@ -1,0 +1,31 @@
+{
+  "name": "@pipes/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --build",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.0",
+    "@fastify/static": "^7.0.0",
+    "@pipes/engine": "0.1.0",
+    "fastify": "^4.28.0",
+    "uuid": "^11.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.10.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,8 @@
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: #0b0b10;
+  font-family: Merriweather, Georgia, serif;
+}
+* { box-sizing: border-box; }
+a { color: #77ccff; }

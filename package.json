@@ -1,0 +1,29 @@
+{
+  "name": "pipes-from-the-grave",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev -w @pipes/server",
+    "dev:mcp": "npm run dev -w @pipes/mcp",
+    "dev:web": "npm run dev -w @pipes/web",
+    "dev:all": "concurrently \"npm:dev:server\" \"npm:dev:web\""
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "concurrently": "^9.1.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

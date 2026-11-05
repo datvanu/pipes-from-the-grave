@@ -1,0 +1,23 @@
+{
+  "name": "@pipes/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "fast-check": "^3.23.0",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.0"
+  }
+}
