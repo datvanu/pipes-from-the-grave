@@ -9,11 +9,14 @@ A spooky visual feed and data pipe editor. Drag nodes, connect ectoplasm edges, 
 ## Features (MVP)
 
 - Browser editor (React + React Flow) with tombstone nodes and glowing edges
+- Live fetches with SSRF protection, 15s timeouts, rate-limit headers, and UI error banners
+- Séance debug: souls (items) per node after a run; Ghost séance with clearer explanations
+- Graveyard template gallery (HN digest, keyword watch, regex cleanup, …)
 - Pipe engine with Fetch RSS/JSON, Filter, Sort, Merge, Truncate, Regex, Rename, Output RSS/JSON
-- Property-based tests (fast-check) for core transforms
+- Property-based / unit tests for core transforms (engine + rate-limit)
 - Ghost builder: natural language → pipe (rule-based demo; optional LLM hook)
 - Fastify API with `/api/*` and public `/p/:id.json|.rss`
-- MCP stdio skeleton so agents can list/create/run pipes
+- MCP stdio bridge that prefers the running HTTP API (`PIPES_API_BASE`)
 - `/.kiro` steering, specs, hooks notes, and MCP settings
 
 ## Requirements

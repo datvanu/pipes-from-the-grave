@@ -12,14 +12,16 @@ const SAFE_RSS_URL = 'https://www.reddit.com/r/programming/.rss';
  * Spooky explanation messages (see spooky-voice.md)
  */
 const EXPLANATIONS = {
-  fetchRss: "A fetch-rss nodeMaterializes from the shadows...",
-  fetchJson: "A fetch-json node forms in the mist...",
-  filter: "A filter node appears, sifting through the ectoplasm...",
-  sort: "A sort node hums with spectral energy...",
-  truncate: "A truncate node contracts the stream...",
-  merge: "A merge node opens, connecting parallel streams...",
-  outputJson: "An output-json node pulses with data...",
-  outputRss: "An output-rss node glows with broadcast energy...",
+  fetchRss: (url: string) => `A fetch-rss node materializes at (80,120) with url: "${url}"`,
+  fetchJson: (url: string) => `A fetch-json node materializes at (80,120) with url: "${url}"`,
+  filter: (field: string, op: string, value: string) => `A filter node materializes at (300,120) - filtering ${field} ${op} "${value}"`,
+  sort: (field: string, order: string) => `A sort node materializes at (300,120) - sorting by ${field} (${order})`,
+  truncate: (limit: number) => `A truncate node materializes at (300,120) - limiting to ${limit} items`,
+  merge: "A merge node materializes at (300,120) - connecting parallel streams",
+  regex: (pattern: string, replacement: string) => `A regex node materializes at (300,120) - pattern: "${pattern}", replace: "${replacement}"`,
+  rename: (from: string, to: string) => `A rename node materializes — mapping "${from}" → "${to}"`,
+  outputJson: "An output-json node materializes at (520,120) - pulsing with data",
+  outputRss: "An output-rss node materializes at (520,120) - glowing with broadcast energy",
   complete: "Pipes assembled. Ectoplasm humming...",
   error: "Something flickers... ah, an error! Let's fix it.",
 };
@@ -46,6 +48,10 @@ export function buildPipeFromPrompt(
     return `${type}-${nodeIdCounter}`;
   };
 
+  // Detect URL in prompt if present
+  const urlMatch = prompt.match(/https?:\/\/[^\s'"`]+/);
+  const promptUrl = urlMatch ? urlMatch[0] : null;
+
   // Parse the prompt for keywords and build nodes
   let hasRss = false;
   let hasJson = false;
@@ -53,6 +59,8 @@ export function buildPipeFromPrompt(
   let hasSort = false;
   let hasTruncate = false;
   let hasMerge = false;
+  let hasRegex = false;
+  let hasRename = false;
   let filterValue = '';
 
   // Detect fetch sources
@@ -62,9 +70,10 @@ export function buildPipeFromPrompt(
     nodes.push({
       id: nodeId,
       type: 'fetch-rss',
-      config: { url: SAFE_RSS_URL },
+      config: { url: promptUrl || SAFE_RSS_URL },
+      position: { x: 80, y: 120 },
     });
-    explanation.push(EXPLANATIONS.fetchRss);
+    explanation.push(EXPLANATIONS.fetchRss(promptUrl || SAFE_RSS_URL));
   }
 
   if (promptLower.includes('json')) {
@@ -73,9 +82,10 @@ export function buildPipeFromPrompt(
     nodes.push({
       id: nodeId,
       type: 'fetch-json',
-      config: { url: 'https://jsonplaceholder.typicode.com/posts' },
+      config: { url: promptUrl || 'https://jsonplaceholder.typicode.com/posts' },
+      position: { x: 80, y: 120 },
     });
-    explanation.push(EXPLANATIONS.fetchJson);
+    explanation.push(EXPLANATIONS.fetchJson(promptUrl || 'https://jsonplaceholder.typicode.com/posts'));
   }
 
   // Detect transformations
@@ -106,8 +116,9 @@ export function buildPipeFromPrompt(
         op: 'contains' as const,
         value: filterValue,
       },
+      position: { x: 300, y: 120 },
     });
-    explanation.push(EXPLANATIONS.filter);
+    explanation.push(EXPLANATIONS.filter('title', 'contains', filterValue));
   }
 
   if (promptLower.includes('sort')) {
@@ -120,8 +131,9 @@ export function buildPipeFromPrompt(
         field: 'published',
         order: 'desc' as const,
       },
+      position: { x: 300, y: 120 },
     });
-    explanation.push(EXPLANATIONS.sort);
+    explanation.push(EXPLANATIONS.sort('published', 'desc'));
   }
 
   if (promptLower.includes('top') || 
@@ -140,8 +152,9 @@ export function buildPipeFromPrompt(
         limit,
         uniqueById: true,
       },
+      position: { x: 300, y: 120 },
     });
-    explanation.push(EXPLANATIONS.truncate);
+    explanation.push(EXPLANATIONS.truncate(limit));
   }
 
   if (promptLower.includes('merge')) {
@@ -153,8 +166,63 @@ export function buildPipeFromPrompt(
       config: {
         uniqueById: true,
       },
+      position: { x: 300, y: 120 },
     });
     explanation.push(EXPLANATIONS.merge);
+  }
+
+  // Detect regex transformation
+  if (promptLower.includes('regex') || promptLower.includes('pattern')) {
+    hasRegex = true;
+    // Try to extract pattern from quotes
+    const patternMatch = prompt.match(/pattern\s+(['"])(.+?)\1/);
+    const pattern = patternMatch ? patternMatch[2] : '[0-9]+';
+    
+    const nodeId = getNextNodeId('regex');
+    nodes.push({
+      id: nodeId,
+      type: 'regex',
+      config: {
+        field: 'title',
+        pattern,
+        replacement: '',
+      },
+      position: { x: 300, y: 120 },
+    });
+    explanation.push(EXPLANATIONS.regex(pattern, ''));
+  }
+
+  // Detect rename transformation
+  if (promptLower.includes('rename') || promptLower.includes('map field')) {
+    hasRename = true;
+    // Try to extract "rename foo to bar" pattern
+    const renameMatch = promptLower.match(/rename\s+['"]?([a-zA-Z0-9_]+)['"]?\s+to\s+['"]?([a-zA-Z0-9_]+)['"]?/);
+    const fromField = renameMatch ? renameMatch[1] : 'oldField';
+    const toField = renameMatch ? renameMatch[2] : 'newField';
+    
+    const nodeId = getNextNodeId('rename');
+    nodes.push({
+      id: nodeId,
+      type: 'rename',
+      config: {
+        mapping: { [fromField]: toField },
+      },
+      position: { x: 300, y: 120 },
+    });
+    explanation.push(EXPLANATIONS.rename(fromField, toField));
+  }
+
+  // Ensure a fetch source exists when transforms were requested without one
+  if (nodes.length > 0 && !hasRss && !hasJson) {
+    const nodeId = getNextNodeId('fetch-rss');
+    nodes.unshift({
+      id: nodeId,
+      type: 'fetch-rss',
+      config: { url: promptUrl || SAFE_RSS_URL },
+      position: { x: 80, y: 120 },
+    });
+    hasRss = true;
+    explanation.unshift(EXPLANATIONS.fetchRss(promptUrl || SAFE_RSS_URL));
   }
 
   // Determine output format
@@ -211,14 +279,16 @@ export function buildPipeFromPrompt(
       id: nodeId,
       type: 'fetch-rss',
       config: { url: SAFE_RSS_URL },
+      position: { x: 80, y: 120 },
     });
-    explanation.push(EXPLANATIONS.fetchRss);
+    explanation.push(EXPLANATIONS.fetchRss(SAFE_RSS_URL));
 
     const outputNodeId = getNextNodeId('output-json');
     nodes.push({
       id: outputNodeId,
       type: 'output-json',
       config: { format: 'json' },
+      position: { x: 520, y: 120 },
     });
     outputNodeIds.push(outputNodeId);
     explanation.push(EXPLANATIONS.outputJson);
@@ -229,6 +299,11 @@ export function buildPipeFromPrompt(
       target: outputNodeId,
     });
   }
+
+  // Normalize positions left-to-right for the editor canvas
+  nodes.forEach((node, i) => {
+    node.position = { x: 80 + i * 220, y: 120 };
+  });
 
   // Final explanation
   explanation.push(EXPLANATIONS.complete);

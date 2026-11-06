@@ -1,1 +1,11 @@
-{ "mcpServers": { "pipes": { "command": "node", "args": ["packages/mcp/dist/index.js"] } } }
+{
+  "mcpServers": {
+    "pipes": {
+      "command": "npx",
+      "args": ["tsx", "packages/mcp/src/index.ts"],
+      "env": {
+        "PIPES_API_BASE": "http://127.0.0.1:8787"
+      }
+    }
+  }
+}

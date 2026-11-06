@@ -6,6 +6,7 @@
 import type { RunPipeOptions, PipeItem } from '../types.js';
 import type { ArrayInput, ArrayOutput } from './types.js';
 import { assertSafeUrl } from '../ssrf.js';
+import { fetchWithTimeout } from '../fetch-safe.js';
 
 /**
  * Configuration for fetch-json node.
@@ -130,7 +131,7 @@ export class FetchJsonRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchFn(this.config.url);
+    const response = await fetchWithTimeout(this.config.url, fetchFn as typeof fetch);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch JSON: ${response.status} ${response.statusText}`);

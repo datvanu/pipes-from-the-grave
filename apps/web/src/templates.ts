@@ -7,10 +7,11 @@ export type PipeDefinition = {
   updatedAt?: string
 }
 
-export const TEMPLATES: { id: string; name: string; pipe: PipeDefinition }[] = [
+export const TEMPLATES: { id: string; name: string; blurb: string; pipe: PipeDefinition }[] = [
   {
     id: 'rss-top-10',
     name: 'RSS Top 10',
+    blurb: 'Fetch a public programming feed and keep the newest 10 items.',
     pipe: {
       id: 'template-rss-top-10',
       name: 'RSS Top 10',
@@ -28,6 +29,7 @@ export const TEMPLATES: { id: string; name: string; pipe: PipeDefinition }[] = [
   {
     id: 'json-filter-sort',
     name: 'JSON Filter Sort',
+    blurb: 'Pull sample JSON posts, keep titles containing a word, sort ascending.',
     pipe: {
       id: 'template-json-filter-sort',
       name: 'JSON Filter Sort',
@@ -45,8 +47,71 @@ export const TEMPLATES: { id: string; name: string; pipe: PipeDefinition }[] = [
     },
   },
   {
+    id: 'hn-frontpage',
+    name: 'Hacker News Digest',
+    blurb: 'Fetch the HN Atom feed, sort by published, keep top 15.',
+    pipe: {
+      id: 'template-hn-frontpage',
+      name: 'Hacker News Digest',
+      nodes: [
+        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://hnrss.org/frontpage' }, position: { x: 80, y: 120 } },
+        { id: 'sort-1', type: 'sort', config: { field: 'published', order: 'desc' }, position: { x: 340, y: 120 } },
+        { id: 'truncate-1', type: 'truncate', config: { limit: 15 }, position: { x: 600, y: 120 } },
+        { id: 'output-rss-1', type: 'output-rss', config: {}, position: { x: 860, y: 120 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'fetch-rss-1', target: 'sort-1' },
+        { id: 'e2', source: 'sort-1', target: 'truncate-1' },
+        { id: 'e3', source: 'truncate-1', target: 'output-rss-1' },
+      ],
+    },
+  },
+  {
+    id: 'keyword-watch',
+    name: 'Keyword Watch',
+    blurb: 'Watch a feed for a keyword in the title, emit JSON.',
+    pipe: {
+      id: 'template-keyword-watch',
+      name: 'Keyword Watch',
+      nodes: [
+        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.reddit.com/r/technology/.rss' }, position: { x: 80, y: 140 } },
+        { id: 'filter-1', type: 'filter', config: { field: 'title', op: 'contains', value: 'AI' }, position: { x: 360, y: 140 } },
+        { id: 'truncate-1', type: 'truncate', config: { limit: 20 }, position: { x: 620, y: 140 } },
+        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 880, y: 140 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'fetch-rss-1', target: 'filter-1' },
+        { id: 'e2', source: 'filter-1', target: 'truncate-1' },
+        { id: 'e3', source: 'truncate-1', target: 'output-json-1' },
+      ],
+    },
+  },
+  {
+    id: 'regex-cleanup',
+    name: 'Regex Title Cleanup',
+    blurb: 'Fetch JSON, strip digits from titles with regex, rename a field.',
+    pipe: {
+      id: 'template-regex-cleanup',
+      name: 'Regex Title Cleanup',
+      nodes: [
+        { id: 'fetch-json-1', type: 'fetch-json', config: { url: 'https://jsonplaceholder.typicode.com/posts' }, position: { x: 60, y: 100 } },
+        { id: 'regex-1', type: 'regex', config: { field: 'title', pattern: '[0-9]+', replacement: '' }, position: { x: 320, y: 100 } },
+        { id: 'rename-1', type: 'rename', config: { mapping: { title: 'headline' } }, position: { x: 580, y: 100 } },
+        { id: 'truncate-1', type: 'truncate', config: { limit: 8 }, position: { x: 840, y: 100 } },
+        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 1100, y: 100 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'fetch-json-1', target: 'regex-1' },
+        { id: 'e2', source: 'regex-1', target: 'rename-1' },
+        { id: 'e3', source: 'rename-1', target: 'truncate-1' },
+        { id: 'e4', source: 'truncate-1', target: 'output-json-1' },
+      ],
+    },
+  },
+  {
     id: 'empty-grave',
     name: 'Empty Grave',
+    blurb: 'Start from a blank canvas.',
     pipe: { id: 'empty', name: 'Untitled Pipe', nodes: [], edges: [] },
   },
 ]

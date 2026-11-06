@@ -6,6 +6,7 @@ import { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { PipeDefinition } from '@pipes/engine';
 import { v4 as uuidv4 } from 'uuid';
 import { runPipe, itemsToJson, itemsToRss20 } from '@pipes/engine';
+import { checkRateLimit, RateLimitError } from './rate-limit.js';
 
 export interface ServerPluginOptions extends FastifyPluginOptions {
   pipesStore: Map<string, PipeDefinition>;
@@ -101,13 +102,41 @@ export async function pipeRouter(
       return;
     }
 
+    // Apply rate limiting
+    const clientIp = request.ip || request.headers['x-forwarded-for'] || 'unknown';
+    const rateLimitResult = checkRateLimit(clientIp as string, { windowMs: 60000, max: 30 });
+
+    if (!rateLimitResult.allowed) {
+      reply.code(429).header('Retry-After', Math.ceil(rateLimitResult.resetMs / 1000).toString());
+      reply.send({
+        error: 'Rate limit exceeded',
+        message: 'Too many requests. Please try again later.',
+        retryAfterMs: rateLimitResult.resetMs,
+        remaining: 0,
+      });
+      return;
+    }
+
     try {
+      const startTime = Date.now();
       const result = await runPipe(pipe);
-      reply.code(200).send(result);
+      const durationMs = Date.now() - startTime;
+
+      reply.code(200).header('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
+      reply.send({
+        output: result.output,
+        itemsByNode: result.itemsByNode,
+        durationMs,
+        rateLimit: {
+          remaining: rateLimitResult.remaining,
+          resetMs: rateLimitResult.resetMs,
+        },
+      });
     } catch (error: any) {
-      reply.code(400).send({ 
-        error: 'Failed to run pipe', 
-        message: error.message 
+      // Keep SSRF messages intact
+      reply.code(400).send({
+        error: 'Failed to run pipe',
+        message: error.message,
       });
     }
   });

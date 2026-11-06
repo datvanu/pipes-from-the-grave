@@ -34,6 +34,15 @@ type PipeNodeData = {
   nodeType: string
   config: Record<string, unknown>
   color: string
+  soulCount?: number
+}
+
+type RunMeta = {
+  durationMs?: number
+  remaining?: number
+  resetMs?: number
+  error?: string
+  status?: number
 }
 
 function TombstoneNode({ data, selected }: { data: PipeNodeData; selected?: boolean }) {
@@ -53,6 +62,9 @@ function TombstoneNode({ data, selected }: { data: PipeNodeData; selected?: bool
       <Handle type="target" position={Position.Left} style={{ background: data.color }} />
       <div style={{ fontFamily: 'Cinzel, serif', color: data.color, fontSize: 12 }}>{data.label}</div>
       <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>{data.nodeType}</div>
+      {typeof data.soulCount === 'number' && (
+        <div style={{ fontSize: 11, marginTop: 6, color: '#9dffc2' }}>{data.soulCount} souls</div>
+      )}
       <Handle type="source" position={Position.Right} style={{ background: data.color }} />
     </div>
   )
@@ -99,6 +111,27 @@ function fromFlow(name: string, nodes: Node[], edges: Edge[]): PipeDefinition {
   }
 }
 
+async function readApiError(res: Response): Promise<{ message: string; status: number; retryAfterMs?: number }> {
+  const status = res.status
+  let message = res.statusText || `HTTP ${status}`
+  let retryAfterMs: number | undefined
+  try {
+    const body = await res.json()
+    message = body.message || body.error || message
+    if (typeof body.retryAfterMs === 'number') retryAfterMs = body.retryAfterMs
+  } catch {
+    try {
+      message = await res.text()
+    } catch {
+      /* keep statusText */
+    }
+  }
+  if (status === 429) {
+    message = `Rate limit — ${message}`
+  }
+  return { message, status, retryAfterMs }
+}
+
 export default function App() {
   const [pipeName, setPipeName] = useState('Untitled Pipe')
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -107,10 +140,16 @@ export default function App() {
   const [ghostOpen, setGhostOpen] = useState(false)
   const [ghostPrompt, setGhostPrompt] = useState('Fetch an RSS feed about rust, sort it, top 5')
   const [ghostLines, setGhostLines] = useState<string[]>([])
+  const [lastGhostLines, setLastGhostLines] = useState<string[]>([])
   const [outputOpen, setOutputOpen] = useState(false)
+  const [seanceOpen, setSeanceOpen] = useState(false)
   const [outputs, setOutputs] = useState<Array<Record<string, unknown>>>([])
+  const [itemsByNode, setItemsByNode] = useState<Record<string, Array<Record<string, unknown>>>>({})
+  const [runMeta, setRunMeta] = useState<RunMeta>({})
   const [status, setStatus] = useState('The graveyard is quiet.')
   const [busy, setBusy] = useState(false)
+  const [savedPipeId, setSavedPipeId] = useState<string | null>(null)
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId])
 
@@ -118,10 +157,11 @@ export default function App() {
     const raw = localStorage.getItem('pipes-grave-draft')
     if (raw) {
       try {
-        const draft = JSON.parse(raw) as { name?: string; nodes: Node[]; edges: Edge[] }
+        const draft = JSON.parse(raw) as { name?: string; nodes: Node[]; edges: Edge[]; savedPipeId?: string }
         setPipeName(draft.name || 'Untitled Pipe')
         setNodes(draft.nodes || [])
         setEdges(draft.edges || [])
+        if (draft.savedPipeId) setSavedPipeId(draft.savedPipeId)
         setStatus('A draft rises from localStorage...')
         return
       } catch {
@@ -137,9 +177,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(
       'pipes-grave-draft',
-      JSON.stringify({ name: pipeName, nodes, edges }),
+      JSON.stringify({ name: pipeName, nodes, edges, savedPipeId }),
     )
-  }, [pipeName, nodes, edges])
+  }, [pipeName, nodes, edges, savedPipeId])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -198,6 +238,16 @@ export default function App() {
     )
   }
 
+  const applySoulCounts = (byNode: Record<string, Array<Record<string, unknown>>>) => {
+    setNodes((ns) =>
+      ns.map((n) => {
+        const count = byNode[n.id]?.length
+        const data = n.data as PipeNodeData
+        return { ...n, data: { ...data, soulCount: typeof count === 'number' ? count : undefined } }
+      }),
+    )
+  }
+
   const loadTemplate = (id: string) => {
     const t = TEMPLATES.find((x) => x.id === id)
     if (!t) return
@@ -205,12 +255,18 @@ export default function App() {
     setPipeName(t.pipe.name)
     setNodes(flow.nodes)
     setEdges(flow.edges)
+    setItemsByNode({})
+    setOutputs([])
+    setRunMeta({})
+    setSavedPipeId(null)
     setStatus(`Template "${t.name}" awakens.`)
+    setGalleryOpen(false)
   }
 
   const runPipe = async () => {
     setBusy(true)
     setStatus('Spirits are running the pipe...')
+    setRunMeta({})
     try {
       const pipe = fromFlow(pipeName, nodes, edges)
       const saveRes = await fetch('/api/pipes', {
@@ -218,16 +274,36 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pipe),
       })
-      if (!saveRes.ok) throw new Error(await saveRes.text())
+      if (!saveRes.ok) {
+        const err = await readApiError(saveRes)
+        throw Object.assign(new Error(err.message), { status: err.status })
+      }
       const saved = await saveRes.json()
+      setSavedPipeId(saved.id)
       const runRes = await fetch(`/api/pipes/${saved.id}/run`, { method: 'POST' })
-      if (!runRes.ok) throw new Error(await runRes.text())
+      if (!runRes.ok) {
+        const err = await readApiError(runRes)
+        setRunMeta({ error: err.message, status: err.status, resetMs: err.retryAfterMs })
+        throw Object.assign(new Error(err.message), { status: err.status })
+      }
       const result = await runRes.json()
+      const byNode = (result.itemsByNode || {}) as Record<string, Array<Record<string, unknown>>>
       setOutputs(result.output || [])
+      setItemsByNode(byNode)
+      applySoulCounts(byNode)
       setOutputOpen(true)
-      setStatus(`Returned ${ (result.output || []).length } souls.`)
+      setSeanceOpen(true)
+      setRunMeta({
+        durationMs: result.durationMs,
+        remaining: result.rateLimit?.remaining,
+        resetMs: result.rateLimit?.resetMs,
+      })
+      const n = (result.output || []).length
+      setStatus(`Returned ${n} souls in ${result.durationMs ?? '?'} ms. Graveyard exports: /p/${saved.id}.json`)
     } catch (err) {
-      setStatus(`The séance failed: ${err instanceof Error ? err.message : String(err)}`)
+      const msg = err instanceof Error ? err.message : String(err)
+      setStatus(`The séance failed: ${msg}`)
+      if (!runMeta.error) setRunMeta((m) => ({ ...m, error: msg }))
     } finally {
       setBusy(false)
     }
@@ -242,16 +318,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: ghostPrompt }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const err = await readApiError(res)
+        throw new Error(err.message)
+      }
       const data = await res.json()
       const pipe = data.pipe as PipeDefinition
       const flow = toFlow(pipe)
       setPipeName(pipe.name || ghostPrompt.slice(0, 40))
       setNodes(flow.nodes)
       setEdges(flow.edges)
-      setGhostLines(Array.isArray(data.explanation) ? data.explanation : [String(data.explanation || '')])
-      setStatus('The Ghost built a pipe from your words.')
-      setGhostOpen(false)
+      setSavedPipeId(null)
+      const lines = Array.isArray(data.explanation) ? data.explanation : [String(data.explanation || '')]
+      setGhostLines(lines)
+      setLastGhostLines(lines)
+      setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes. Review the canvas, then Run.`)
     } catch (err) {
       setGhostLines([`Something flickers... ${err instanceof Error ? err.message : String(err)}`])
     } finally {
@@ -260,6 +341,7 @@ export default function App() {
   }
 
   const cfg = (selected?.data as PipeNodeData | undefined)?.config || {}
+  const selectedSouls = selectedId ? itemsByNode[selectedId] || [] : []
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0b0b10', color: '#e8e8f0' }}>
@@ -271,6 +353,7 @@ export default function App() {
           padding: '10px 16px',
           borderBottom: '1px solid #2a2a35',
           background: '#111118',
+          flexWrap: 'wrap',
         }}
       >
         <h1 style={{ fontFamily: 'Creepster, Cinzel, serif', color: '#55ff99', fontSize: 28, margin: 0 }}>
@@ -279,28 +362,27 @@ export default function App() {
         <input
           value={pipeName}
           onChange={(e) => setPipeName(e.target.value)}
+          aria-label="Pipe name"
           style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: '6px 10px' }}
         />
-        <select
-          defaultValue=""
-          onChange={(e) => {
-            if (e.target.value) loadTemplate(e.target.value)
-            e.target.value = ''
-          }}
-          style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-        >
-          <option value="">Graveyard templates...</option>
-          {TEMPLATES.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setGalleryOpen(true)} disabled={busy}>Graveyard</button>
           <button onClick={() => setGhostOpen(true)} disabled={busy}>Ghost Séance</button>
+          <button onClick={() => setSeanceOpen((v) => !v)} disabled={Object.keys(itemsByNode).length === 0}>
+            Debug Souls
+          </button>
           <button onClick={runPipe} disabled={busy || nodes.length === 0}>Run</button>
         </div>
       </header>
+
+      {runMeta.error && (
+        <div style={{ background: '#3a1518', color: '#ffb0b8', padding: '8px 16px', borderBottom: '1px solid #66222a' }}>
+          <strong>Haunt:</strong> {runMeta.error}
+          {runMeta.status === 429 && runMeta.resetMs != null && (
+            <span> — retry in ~{Math.ceil(runMeta.resetMs / 1000)}s</span>
+          )}
+        </div>
+      )}
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <aside style={{ width: 200, borderRight: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
@@ -345,7 +427,7 @@ export default function App() {
           </ReactFlow>
         </main>
 
-        <aside style={{ width: 280, borderLeft: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
+        <aside style={{ width: 300, borderLeft: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
           <h3 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Inspector</h3>
           {!selected && <p style={{ opacity: 0.7 }}>Select a tombstone to configure it.</p>}
           {selected && (
@@ -370,22 +452,47 @@ export default function App() {
                   style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
                 />
               </label>
+              {selectedSouls.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontFamily: 'Cinzel, serif', color: '#9dffc2', fontSize: 13 }}>
+                    Souls at this node ({selectedSouls.length})
+                  </div>
+                  <ul style={{ paddingLeft: 16, fontSize: 12, maxHeight: 160, overflow: 'auto' }}>
+                    {selectedSouls.slice(0, 8).map((item, idx) => (
+                      <li key={String(item.id || idx)}>{String(item.title || item.id || 'item')}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          {lastGhostLines.length > 0 && (
+            <div style={{ marginTop: 16, borderTop: '1px solid #2a2a35', paddingTop: 12 }}>
+              <h4 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99', margin: '0 0 8px' }}>Last Ghost Words</h4>
+              <ul style={{ paddingLeft: 16, fontSize: 12, color: '#9dffc2' }}>
+                {lastGhostLines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
             </div>
           )}
         </aside>
       </div>
 
-      <footer style={{ padding: '8px 16px', borderTop: '1px solid #2a2a35', background: '#111118', fontSize: 13 }}>
-        {status}
+      <footer style={{ padding: '8px 16px', borderTop: '1px solid #2a2a35', background: '#111118', fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <span>{status}</span>
+        {typeof runMeta.remaining === 'number' && (
+          <span style={{ opacity: 0.8 }}>Rate limit remaining: {runMeta.remaining}</span>
+        )}
         {outputOpen && (
-          <button style={{ marginLeft: 12 }} onClick={() => setOutputOpen((v) => !v)}>
+          <button style={{ marginLeft: 'auto' }} onClick={() => setOutputOpen((v) => !v)}>
             {outputOpen ? 'Hide output' : 'Show output'}
           </button>
         )}
       </footer>
 
       {outputOpen && (
-        <div style={{ maxHeight: 220, overflow: 'auto', borderTop: '1px solid #2a2a35', background: '#0f0f16', padding: 12 }}>
+        <div style={{ maxHeight: 200, overflow: 'auto', borderTop: '1px solid #2a2a35', background: '#0f0f16', padding: 12 }}>
           <h3 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99', marginTop: 0 }}>Séance Output</h3>
           {outputs.length === 0 && <p>No items returned.</p>}
           {outputs.map((item, idx) => (
@@ -404,6 +511,46 @@ export default function App() {
         </div>
       )}
 
+      {seanceOpen && Object.keys(itemsByNode).length > 0 && (
+        <div style={{ maxHeight: 180, overflow: 'auto', borderTop: '1px solid #2a2a35', background: '#101018', padding: 12 }}>
+          <h3 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99', marginTop: 0 }}>Séance Debug — souls per node</h3>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {Object.entries(itemsByNode).map(([nodeId, items]) => (
+              <button
+                key={nodeId}
+                onClick={() => setSelectedId(nodeId)}
+                style={{ background: '#1a1a22', border: '1px solid #333', borderRadius: 8, padding: '8px 10px' }}
+              >
+                <div style={{ fontFamily: 'Cinzel, serif', color: '#9dffc2' }}>{nodeId}</div>
+                <div style={{ fontSize: 12 }}>{items.length} items</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {galleryOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', display: 'grid', placeItems: 'center', zIndex: 50 }}>
+          <div style={{ width: 640, maxHeight: '80vh', overflow: 'auto', background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
+            <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Graveyard Templates</h2>
+            <p style={{ opacity: 0.8 }}>Pick a resting pipe to awaken. No third-party brand marks — just public feeds.</p>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => loadTemplate(t.id)}
+                  style={{ textAlign: 'left', background: '#1a1a22', border: '1px solid #333', borderRadius: 8, padding: 12 }}
+                >
+                  <div style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>{t.name}</div>
+                  <div style={{ fontSize: 13, opacity: 0.8 }}>{t.blurb}</div>
+                </button>
+              ))}
+            </div>
+            <button style={{ marginTop: 12 }} onClick={() => setGalleryOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
       {ghostOpen && (
         <div
           style={{
@@ -417,7 +564,7 @@ export default function App() {
         >
           <div style={{ width: 520, background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
             <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Ghost Séance</h2>
-            <p style={{ opacity: 0.8 }}>Speak a sentence. The Ghost shapes a pipe.</p>
+            <p style={{ opacity: 0.8 }}>Speak a sentence. The Ghost shapes a pipe (demo rules; optional LLM later).</p>
             <textarea
               value={ghostPrompt}
               onChange={(e) => setGhostPrompt(e.target.value)}

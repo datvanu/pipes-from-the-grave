@@ -7,6 +7,7 @@ import { XMLParser } from 'fast-xml-parser';
 import type { RunPipeOptions, PipeItem } from '../types.js';
 import type { ArrayInput, ArrayOutput } from './types.js';
 import { assertSafeUrl } from '../ssrf.js';
+import { fetchWithTimeout } from '../fetch-safe.js';
 
 /**
  * Configuration for fetch-rss node.
@@ -14,6 +15,19 @@ import { assertSafeUrl } from '../ssrf.js';
 export interface FetchRssConfig {
   url: string;
   itemsOverride?: PipeItem[]; // For testing
+}
+
+/** Normalize parser nodes that may be string or { _text }. */
+function textOf(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>;
+    if ('_text' in obj) return String(obj._text ?? '');
+    if ('__cdata' in obj) return String(obj.__cdata ?? '');
+    if ('#text' in obj) return String(obj['#text'] ?? '');
+  }
+  return '';
 }
 
 /**
@@ -41,16 +55,16 @@ export function parseRssFeed(xml: string): PipeItem[] {
       : [result.rss.channel.item];
 
     return items.map((item: any) => ({
-      id: item.guid?._text || item.link || '',
-      title: item.title?._text || '',
-      link: item.link || '',
-      summary: item.description?._text || item.summary?._text || '',
-      published: item.pubDate?._text || item.updated?._text || '',
-      author: item.author?._text || item['dc:creator']?._text || '',
+      id: textOf(item.guid) || textOf(item.link) || textOf(item.title),
+      title: textOf(item.title),
+      link: textOf(item.link) || (typeof item.link === 'object' ? item.link?.href || '' : ''),
+      summary: textOf(item.description) || textOf(item.summary),
+      published: textOf(item.pubDate) || textOf(item.updated),
+      author: textOf(item.author) || textOf(item['dc:creator']),
       tags: item.category
         ? Array.isArray(item.category)
-          ? item.category.map((c: any) => c._text || c)
-          : [item.category]
+          ? item.category.map((c: any) => textOf(c) || c?.term || String(c))
+          : [textOf(item.category) || item.category?.term || String(item.category)]
         : [],
     }));
   }
@@ -61,19 +75,24 @@ export function parseRssFeed(xml: string): PipeItem[] {
       ? result.feed.entry
       : [result.feed.entry];
 
-    return entries.map((entry: any) => ({
-      id: entry.id?._text || entry.link?.href || '',
-      title: entry.title?._text || '',
-      link: entry.link?.href || '',
-      summary: entry.summary?._text || '',
-      published: entry.published?._text || '',
-      author: entry.author?.name?._text || '',
-      tags: entry.category
-        ? Array.isArray(entry.category)
-          ? entry.category.map((c: any) => c.term || '')
-          : [entry.category.term || '']
-        : [],
-    }));
+    return entries.map((entry: any) => {
+      const link = Array.isArray(entry.link)
+        ? (entry.link.find((l: any) => l.rel === 'alternate') || entry.link[0])
+        : entry.link;
+      return {
+        id: textOf(entry.id) || (typeof link === 'object' ? link?.href || '' : textOf(link)),
+        title: textOf(entry.title),
+        link: typeof link === 'object' ? link?.href || '' : textOf(link),
+        summary: textOf(entry.summary) || textOf(entry.content),
+        published: textOf(entry.published) || textOf(entry.updated),
+        author: textOf(entry.author?.name) || textOf(entry.author),
+        tags: entry.category
+          ? Array.isArray(entry.category)
+            ? entry.category.map((c: any) => c.term || textOf(c) || '')
+            : [entry.category.term || textOf(entry.category) || '']
+          : [],
+      };
+    });
   }
 
   return [];
@@ -121,7 +140,7 @@ export class FetchRssRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchFn(this.config.url);
+    const response = await fetchWithTimeout(this.config.url, fetchFn as typeof fetch);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch feed: ${response.status} ${response.statusText}`);

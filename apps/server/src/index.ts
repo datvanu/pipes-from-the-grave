@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { pipeRouter } from './router.js';
 import type { PipeDefinition } from '@pipes/engine';
 import { isSafeUrl } from '@pipes/engine';
+import { checkRateLimit } from './rate-limit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,6 +105,14 @@ export async function startServer() {
     return { status: 'healthy', timestamp: new Date().toISOString() };
   });
 
+  // Pre-handler to set rate limit headers when available
+  app.addHook('preHandler', (request, reply, done) => {
+    // Add common headers that might be useful
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    done();
+  });
+
   // Pipe routes
   app.register(pipeRouter, { pipesStore, savePipesToFile });
 
@@ -114,6 +123,20 @@ export async function startServer() {
       
       if (!body.prompt || typeof body.prompt !== 'string') {
         reply.code(400).send({ error: 'Missing or invalid prompt' });
+        return;
+      }
+
+      const clientIp = (request.ip || request.headers['x-forwarded-for'] || 'unknown') as string;
+      const rl = checkRateLimit(`ghost:${clientIp}`, { windowMs: 60000, max: 20 });
+      reply.header('X-RateLimit-Remaining', String(rl.remaining));
+      if (!rl.allowed) {
+        reply.code(429).header('Retry-After', String(Math.ceil(rl.resetMs / 1000)));
+        reply.send({
+          error: 'Rate limit exceeded',
+          message: 'Too many ghost séances. Please try again later.',
+          retryAfterMs: rl.resetMs,
+          remaining: 0,
+        });
         return;
       }
 

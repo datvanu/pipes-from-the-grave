@@ -16,3 +16,4 @@ logs/
 *.key
 .credentials/
 apps/server/data/
+*.tsbuildinfo
