@@ -1,0 +1,14 @@
+# Render blueprint for a single Free web service (UI + API).
+# Do not apply this blueprint or connect a Render account without Kilian's approval.
+services:
+  - type: web
+    name: pipes-from-the-grave
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build -w @pipes/web
+    startCommand: npx tsx apps/server/src/index.ts
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: GHOST_MODE
+        value: demo
