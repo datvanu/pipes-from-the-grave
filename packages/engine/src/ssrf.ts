@@ -28,25 +28,73 @@ function stripBrackets(host: string): string {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 
-function mappedIPv4(addr: ipaddr.IPv6): string | null {
-  if (addr.isIPv4MappedAddress()) {
-    return addr.toIPv4Address().toString();
+function ipv4FromBytes(bytes: number[], offset: number, xor = 0): string {
+  return `${bytes[offset]! ^ xor}.${bytes[offset + 1]! ^ xor}.${bytes[offset + 2]! ^ xor}.${bytes[offset + 3]! ^ xor}`;
+}
+
+/**
+ * Extract IPv4 addresses embedded in IPv6 transition forms.
+ * Returns an empty list when the address is not a known transition prefix.
+ */
+export function embeddedIPv4s(ip: ipaddr.IPv6): string[] {
+  const bytes = ip.toByteArray();
+  const parts = ip.parts;
+  const found: string[] = [];
+  const take = (offset: number, xor = 0) => {
+    found.push(ipv4FromBytes(bytes, offset, xor));
+  };
+
+  // IPv4-mapped ::ffff:a.b.c.d  (::ffff:0:0/96)
+  if (bytes.slice(0, 10).every((b) => b === 0) && bytes[10] === 0xff && bytes[11] === 0xff) {
+    take(12);
   }
-  const parts = addr.toNormalizedString();
-  // NAT64 64:ff9b::/96
-  if (parts.startsWith('64:ff9b:0:0:0:0:')) {
-    try {
-      return addr.toIPv4Address().toString();
-    } catch {
-      const hex = parts.split(':').slice(-2);
-      if (hex.length === 2) {
-        const a = parseInt(hex[0], 16);
-        const b = parseInt(hex[1], 16);
-        return `${(a >> 8) & 255}.${a & 255}.${(b >> 8) & 255}.${b & 255}`;
-      }
-    }
+
+  // SIIT / IPv4-translated ::ffff:0:a.b.c.d  (::ffff:0:0:0/96)
+  if (
+    bytes.slice(0, 8).every((b) => b === 0) &&
+    bytes[8] === 0xff &&
+    bytes[9] === 0xff &&
+    bytes[10] === 0 &&
+    bytes[11] === 0
+  ) {
+    take(12);
   }
-  return null;
+
+  // Deprecated IPv4-compatible ::a.b.c.d  (::/96)
+  if (bytes.slice(0, 12).every((b) => b === 0)) {
+    take(12);
+  }
+
+  // 6to4 2002::/16 — IPv4 in bits 16–47
+  if (bytes[0] === 0x20 && bytes[1] === 0x02) {
+    take(2);
+  }
+
+  // Teredo 2001::/32 — server IPv4 in bits 32–63, client IPv4 in the last
+  // 32 bits XOR 0xFFFFFFFF.
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0 && bytes[3] === 0) {
+    take(4);
+    take(12, 0xff);
+  }
+
+  // Well-known NAT64 64:ff9b::/96 and 64:ff9b:1::/96 (RFC 6052 / RFC 8215)
+  if (
+    parts[0] === 0x64 &&
+    parts[1] === 0xff9b &&
+    parts[3] === 0 &&
+    parts[4] === 0 &&
+    parts[5] === 0 &&
+    (parts[2] === 0 || parts[2] === 1)
+  ) {
+    take(12);
+  }
+
+  return found;
+}
+
+function isSiteLocalV6(addr: ipaddr.IPv6): boolean {
+  // Deprecated site-local fec0::/10
+  return (addr.parts[0]! & 0xffc0) === 0xfec0;
 }
 
 const BLOCKED_V4_RANGES = new Set([
@@ -79,8 +127,15 @@ export function isBlockedAddress(ip: string): boolean {
     const parsed = ipaddr.parse(raw);
     if (parsed.kind() === 'ipv6') {
       const v6 = parsed as ipaddr.IPv6;
-      const v4 = mappedIPv4(v6);
-      if (v4) return isBlockedAddress(v4);
+      if (isSiteLocalV6(v6)) return true;
+      const embedded = embeddedIPv4s(v6);
+      if (embedded.length > 0) {
+        // Block if any embedded IPv4 is blocked; otherwise fall through only
+        // when extraction succeeded. Unknown or incomplete forms already
+        // produce no candidates and are classified below.
+        if (embedded.some((v4) => isBlockedAddress(v4))) return true;
+        return BLOCKED_V6_RANGES.has(v6.range());
+      }
       return BLOCKED_V6_RANGES.has(v6.range());
     }
     const v4 = parsed as ipaddr.IPv4;

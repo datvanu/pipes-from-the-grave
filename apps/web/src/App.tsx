@@ -313,7 +313,7 @@ export default function App() {
         }
       })
       .catch(() => {
-        if (!cancelled) setAcceptVisitorKeys(true)
+        // Fail closed: only show the key field after the host explicitly allows it.
       })
       .finally(() => {
         window.clearTimeout(timer)
@@ -820,7 +820,7 @@ export default function App() {
           Type a short sentence. With no key, the Ghost uses free built-in rules (words such as “rss”, “sort”, “top 5”).
           It does not understand free-form language.
         </p>
-        {acceptVisitorKeys !== false && (
+        {acceptVisitorKeys === true && (
         <p style={{ opacity: 0.8 }}>
           Optional: paste your own API key for the provider below if you want a live model that can follow a fuller
           sentence. The key stays in this browser until you close the tab — or until you click Clear key. If you tick

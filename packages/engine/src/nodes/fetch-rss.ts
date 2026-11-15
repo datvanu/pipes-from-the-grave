@@ -144,15 +144,10 @@ export class FetchRssRunner {
       throw new Error('fetch-rss node requires "url" or "itemsOverride"');
     }
 
-    // Fetch the feed
-    const fetchFn = options?.fetchFn ?? globalThis.fetch;
-    
-    if (!fetchFn) {
-      throw new Error('fetchFn not available');
-    }
-
+    // Only pass fetchFn when a test injects one. Otherwise safeFetch pins
+    // the connection to the already-checked addresses via the undici Agent.
     const response = await safeFetch(url, {
-      fetchFn: fetchFn as typeof fetch,
+      ...(options?.fetchFn ? { fetchFn: options.fetchFn } : {}),
       lookup: options?.lookupFn,
       signal: options?.signal,
     });

@@ -57,6 +57,39 @@ describe('isSafeUrl', () => {
     expect(isSafeUrl('http://[::ffff:169.254.169.254]/feed.xml')).toBe(false);
   });
 
+  it('rejects IPv6 transition forms that embed a blocked IPv4, plus site-local', () => {
+    // SIIT / IPv4-translated ::ffff:0:a.b.c.d
+    expect(isSafeUrl('http://[::ffff:0:127.0.0.1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[::ffff:0:10.0.0.1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[::ffff:0:7f00:1]/feed.xml')).toBe(false);
+    // 6to4 2002::/16
+    expect(isSafeUrl('http://[2002:7f00:1::1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[2002:c0a8:1::1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[2002:a00:1::]/feed.xml')).toBe(false);
+    // Teredo 2001::/32 with a private client (192.168.1.1 XOR 255.255.255.255)
+    expect(isSafeUrl('http://[2001:0:808:808:0:0:3f57:fefe]/feed.xml')).toBe(false);
+    // Site-local fec0::/10
+    expect(isSafeUrl('http://[fec0::1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[fed0:1234::1]/feed.xml')).toBe(false);
+    // Deprecated IPv4-compatible ::a.b.c.d
+    expect(isSafeUrl('http://[::127.0.0.1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[::10.0.0.1]/feed.xml')).toBe(false);
+    // NAT64 64:ff9b::/96 and 64:ff9b:1::/96
+    expect(isSafeUrl('http://[64:ff9b::7f00:1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[64:ff9b::10.0.0.1]/feed.xml')).toBe(false);
+    expect(isSafeUrl('http://[64:ff9b:1::10.0.0.1]/feed.xml')).toBe(false);
+  });
+
+  it('allows transition forms only when every embedded IPv4 is public', () => {
+    expect(isSafeUrl('http://[::ffff:8.8.8.8]/feed.xml')).toBe(true);
+    expect(isSafeUrl('http://[::ffff:0:8.8.8.8]/feed.xml')).toBe(true);
+    expect(isSafeUrl('http://[2002:808:808::1]/feed.xml')).toBe(true);
+    expect(isSafeUrl('http://[::8.8.8.8]/feed.xml')).toBe(true);
+    expect(isSafeUrl('http://[64:ff9b::808:808]/feed.xml')).toBe(true);
+    // Teredo with public server 8.8.8.8 and public client 8.8.8.8
+    expect(isSafeUrl('http://[2001:0:808:808:0:0:f7f7:f7f7]/feed.xml')).toBe(true);
+  });
+
   it('rejects non-80/443 ports and credentials', () => {
     expect(isSafeUrl('https://example.com:8443/feed.xml')).toBe(false);
     expect(isSafeUrl('http://example.com:8080/feed.xml')).toBe(false);
@@ -87,8 +120,16 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('fc00::1')).toBe(true);
     expect(isBlockedAddress('fe80::1')).toBe(true);
     expect(isBlockedAddress('::ffff:192.168.0.1')).toBe(true);
+    expect(isBlockedAddress('::ffff:0:10.0.0.1')).toBe(true);
+    expect(isBlockedAddress('2002:7f00:1::1')).toBe(true);
+    expect(isBlockedAddress('2001:0:a00:1:0:0:3f57:fefe')).toBe(true);
+    expect(isBlockedAddress('fec0::1')).toBe(true);
+    expect(isBlockedAddress('::10.0.0.1')).toBe(true);
+    expect(isBlockedAddress('64:ff9b::c0a8:1')).toBe(true);
     expect(isBlockedAddress('8.8.8.8')).toBe(false);
     expect(isBlockedAddress('2001:4860:4860::8888')).toBe(false);
+    expect(isBlockedAddress('::ffff:8.8.8.8')).toBe(false);
+    expect(isBlockedAddress('2002:808:808::1')).toBe(false);
   });
 });
 
