@@ -187,13 +187,3 @@ export async function safeFetch(url: string, options: SafeFetchOptions = {}): Pr
     cancel();
   }
 }
-
-/** @deprecated Use safeFetch. Kept as a name alias for existing imports. */
-export async function fetchWithTimeout(
-  url: string,
-  fetchFn: typeof fetch,
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
-  signal?: AbortSignal,
-): Promise<Response> {
-  return safeFetch(url, { fetchFn, timeoutMs, signal });
-}
