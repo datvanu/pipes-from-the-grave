@@ -9,7 +9,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pipeRouter } from './router.js';
 import type { PipeDefinition } from '@pipes/engine';
-import { checkRateLimit } from './rate-limit.js';
+import type { runPipe as RunPipeFn } from '@pipes/engine';
+import { clientIp, gateGhost, isGhostDemoOnly, parseTrustProxy, httpLimits, sendRateLimited } from './pipe-limits.js';
 import {
   LOG_REDACT_PATHS,
   buildPipeWithUserKey,
@@ -31,8 +32,14 @@ const pipesStore: Map<string, PipeDefinition> = new Map();
 // Optional file persistence
 const PERSISTENCE_FILE = path.join(__dirname, '..', 'data', 'pipes.json');
 
-// Cache for exported pipes
-const exportCache = new Map<string, { items: any; expires: number }>();
+// Cache for exported pipes, keyed by `${id}:json` or `${id}:rss`.
+const exportCache = new Map<string, { body: unknown; expires: number }>();
+
+/** Test helper: drop in-memory pipes and export cache. */
+export function resetMemoryState() {
+  pipesStore.clear();
+  exportCache.clear();
+}
 
 /**
  * Load pipes from file (if exists)
@@ -72,6 +79,7 @@ async function savePipesToFile(): Promise<void> {
 export type CreateAppOptions = {
   logger?: boolean | Record<string, unknown>;
   llmFetch?: typeof fetch;
+  runPipeFn?: typeof RunPipeFn;
 };
 
 /**
@@ -82,6 +90,8 @@ export async function createApp(options: CreateAppOptions = {}) {
     logger: options.logger ?? {
       redact: { paths: LOG_REDACT_PATHS, censor: '[REDACTED]' },
     },
+    trustProxy: parseTrustProxy(),
+    bodyLimit: httpLimits.maxBodyBytes,
   });
 
   // CORS — localhost defaults for dev; set CORS_ORIGINS for a hosted frontend.
@@ -92,7 +102,7 @@ export async function createApp(options: CreateAppOptions = {}) {
     .filter(Boolean);
   await app.register(cors, {
     origin: corsOrigins,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Ghost-LLM-Key'],
   });
 
@@ -130,8 +140,14 @@ export async function createApp(options: CreateAppOptions = {}) {
     done();
   });
 
-  // Pipe routes
-  app.register(pipeRouter, { pipesStore, savePipesToFile });
+  // Pipe routes (create/get/run/export). No public list or delete.
+  app.register(pipeRouter, {
+    pipesStore,
+    savePipesToFile,
+    exportCache,
+    runPipeFn: options.runPipeFn,
+    port: PORT,
+  });
 
   // Never echo a user-supplied LLM key in a response body.
   app.addHook('onSend', (request, _reply, payload, done) => {
@@ -160,27 +176,27 @@ export async function createApp(options: CreateAppOptions = {}) {
         return;
       }
 
-      const clientIp = (request.ip || request.headers['x-forwarded-for'] || 'unknown') as string;
-      const rl = checkRateLimit(`ghost:${clientIp}`, { windowMs: 60000, max: 20 });
+      const rl = gateGhost(clientIp(request));
       reply.header('X-RateLimit-Remaining', String(rl.remaining));
       if (!rl.allowed) {
-        reply.code(429).header('Retry-After', String(Math.ceil(rl.resetMs / 1000)));
-        reply.send({
-          error: 'Rate limit exceeded',
-          message: 'Too many ghost séances. Please try again later.',
-          retryAfterMs: rl.resetMs,
-          remaining: 0,
-        });
+        sendRateLimited(reply, rl, 'Too many ghost séances. Please try again later.');
         return;
       }
 
       const { buildPipeFromPrompt } = await import('./ghost.js');
 
-      // Default is the free, rule-based demo. A user-supplied key (BYOK) is
+      // Default is the free, rule-based demo. A user-supplied key is
       // forwarded once to an allowlisted provider and never stored.
-      if (!apiKey) {
+      // GHOST_MODE=demo (hosted jury URL) refuses forwarding entirely.
+      if (!apiKey || isGhostDemoOnly()) {
         const result = buildPipeFromPrompt(body.prompt);
-        reply.code(200).send({ ...result, mode: 'demo' });
+        reply.code(200).send({
+          ...result,
+          mode: 'demo',
+          ...(apiKey && isGhostDemoOnly()
+            ? { fallbackReason: 'This host is in demo mode; visitor keys are not forwarded.' }
+            : {}),
+        });
         return;
       }
 
@@ -217,93 +233,6 @@ export async function createApp(options: CreateAppOptions = {}) {
       reply.code(500).send({
         error: 'Ghost builder failed',
         message: redact(error?.message || 'unknown error'),
-      });
-    }
-  });
-
-  // Export endpoints (public pipes)
-  app.get('/p/:id.json', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    
-    if (!pipesStore.has(id)) {
-      reply.code(404).send({ error: 'Pipe not found' });
-      return;
-    }
-
-    // Check cache
-    const cached = exportCache.get(id);
-    if (cached && cached.expires > Date.now()) {
-      reply.code(200).header('Content-Type', 'application/json');
-      reply.send(cached.items);
-      return;
-    }
-
-    const pipe = pipesStore.get(id)!;
-    
-    try {
-      const { runPipe } = await import('@pipes/engine');
-      const result = await runPipe(pipe);
-      
-      const cacheDuration = 60000; // 60 seconds
-      exportCache.set(id, {
-        items: result.output,
-        expires: Date.now() + cacheDuration,
-      });
-
-      reply.code(200).header('Content-Type', 'application/json');
-      reply.send(result.output);
-    } catch (error: any) {
-      reply.code(400).send({ 
-        error: 'Failed to run pipe', 
-        message: error.message 
-      });
-    }
-  });
-
-  app.get('/p/:id.rss', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    
-    if (!pipesStore.has(id)) {
-      reply.code(404).send({ error: 'Pipe not found' });
-      return;
-    }
-
-    // Check cache
-    const cached = exportCache.get(id);
-    if (cached && cached.expires > Date.now()) {
-      reply.code(200).header('Content-Type', 'application/rss+xml');
-      reply.send(cached.items);
-      return;
-    }
-
-    const pipe = pipesStore.get(id)!;
-    
-    try {
-      const { runPipe, itemsToRss20 } = await import('@pipes/engine');
-      const result = await runPipe(pipe);
-      
-      // Add channel metadata
-      const channelMeta = {
-        title: `${pipe.name} - Pipes from the Grave`,
-        link: `http://localhost:${PORT}/p/${pipe.id}.rss`,
-        description: `RSS feed generated from pipe: ${pipe.name}`,
-        generator: 'pipes-from-the-grave',
-      };
-
-      const rss = itemsToRss20(result.output, channelMeta);
-      
-      const cacheDuration = 60000; // 60 seconds
-      exportCache.set(id, {
-        items: rss,
-        expires: Date.now() + cacheDuration,
-      });
-
-      reply.code(200).header('Content-Type', 'application/rss+xml');
-      reply.send(rss);
-    } catch (error: any) {
-      reply.code(400).send({ 
-        error: 'Failed to run pipe', 
-        message: error.message 
       });
     }
   });

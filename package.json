@@ -14,7 +14,8 @@
     "dev:server": "npm run dev -w @pipes/server",
     "dev:mcp": "npm run dev -w @pipes/mcp",
     "dev:web": "npm run dev -w @pipes/web",
-    "dev:all": "concurrently \"npm:dev:server\" \"npm:dev:web\""
+    "dev:all": "concurrently \"npm:dev:server\" \"npm:dev:web\"",
+    "start": "npm run start -w @pipes/server"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

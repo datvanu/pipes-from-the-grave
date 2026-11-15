@@ -1,143 +1,230 @@
 /**
  * Pipe API router for @pipes/server
  */
-
 import { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import { PipeDefinition } from '@pipes/engine';
-import { v4 as uuidv4 } from 'uuid';
-import { runPipe, itemsToJson, itemsToRss20 } from '@pipes/engine';
-import { checkRateLimit, RateLimitError } from './rate-limit.js';
+import type { PipeDefinition } from '@pipes/engine';
+import { runPipe as engineRunPipe, itemsToRss20 } from '@pipes/engine';
+import {
+  clientIp,
+  gateExpensiveRun,
+  hasItemsOverride,
+  httpLimits,
+  isServerPipeId,
+  newPipeId,
+  publicBaseUrl,
+  runPipeBounded,
+  sendRateLimited,
+  validatePipeShape,
+} from './pipe-limits.js';
 
 export interface ServerPluginOptions extends FastifyPluginOptions {
   pipesStore: Map<string, PipeDefinition>;
   savePipesToFile: () => Promise<void>;
+  exportCache: Map<string, { body: unknown; expires: number }>;
+  runPipeFn?: typeof engineRunPipe;
+  port?: number;
 }
 
-export async function pipeRouter(
-  app: FastifyInstance,
-  options: ServerPluginOptions,
-) {
-  const { pipesStore, savePipesToFile } = options;
+function preparePipe(
+  body: PipeDefinition,
+  pipesStore: Map<string, PipeDefinition>,
+): { error?: string; pipe?: PipeDefinition } {
+  const shapeError = validatePipeShape(body);
+  if (shapeError) return { error: shapeError };
+  if (hasItemsOverride(body)) {
+    return { error: 'itemsOverride is not allowed on the public API' };
+  }
 
-  // GET /api/pipes - List all pipes
-  app.get('/api/pipes', async (request, reply) => {
-    const pipes = Array.from(pipesStore.values()).map(p => ({
-      id: p.id,
-      name: p.name,
-      nodes: p.nodes.length,
-      edges: p.edges.length,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
-    return { pipes };
-  });
+  const now = new Date().toISOString();
+  const existingId = isServerPipeId(body.id) && pipesStore.has(body.id) ? body.id : null;
+  const id = existingId || newPipeId();
+  const previous = existingId ? pipesStore.get(id) : undefined;
 
-  // GET /api/pipes/:id - Get a specific pipe
+  const pipe: PipeDefinition = {
+    ...body,
+    id,
+    createdAt: previous?.createdAt || now,
+    updatedAt: now,
+  };
+  return { pipe };
+}
+
+export async function pipeRouter(app: FastifyInstance, options: ServerPluginOptions) {
+  const { pipesStore, savePipesToFile, exportCache } = options;
+  const runFn = options.runPipeFn || engineRunPipe;
+  const port = options.port || 8787;
+
+  // GET /api/pipes — intentionally not listed (no public inventory).
+
   app.get('/api/pipes/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const pipe = pipesStore.get(id);
-
     if (!pipe) {
       reply.code(404).send({ error: 'Pipe not found' });
       return;
     }
-
     return pipe;
   });
 
-  // POST /api/pipes - Create or update a pipe
+  // Create a new pipe (server-assigned UUID) or update an existing unguessable id.
   app.post('/api/pipes', async (request, reply) => {
-    const body = request.body as PipeDefinition;
-
-    // Validate required fields
-    if (!body.name) {
-      reply.code(400).send({ error: 'Pipe must have a name' });
+    const prepared = preparePipe((request.body || {}) as PipeDefinition, pipesStore);
+    if (prepared.error || !prepared.pipe) {
+      reply.code(400).send({ error: prepared.error });
       return;
     }
-
-    if (!body.nodes || body.nodes.length === 0) {
-      reply.code(400).send({ error: 'Pipe must have at least one node' });
-      return;
-    }
-
-    // Generate ID if not provided
-    const id = body.id || uuidv4();
-    const now = new Date().toISOString();
-
-    const pipe: PipeDefinition = {
-      ...body,
-      id,
-      createdAt: body.createdAt || now,
-      updatedAt: now,
-    };
-
-    pipesStore.set(id, pipe);
-    savePipesToFile();
-
-    reply.code(201).send(pipe);
+    const created = !pipesStore.has(prepared.pipe.id);
+    pipesStore.set(prepared.pipe.id, prepared.pipe);
+    void savePipesToFile();
+    reply.code(created ? 201 : 200).send(prepared.pipe);
   });
 
-  // DELETE /api/pipes/:id - Delete a pipe
-  app.delete('/api/pipes/:id', async (request, reply) => {
+  // DELETE is not public. Unregistered routes under /api/* 404.
+
+  async function executeRun(pipe: PipeDefinition, request: any, reply: any, persist: boolean) {
+    if (hasItemsOverride(pipe) || validatePipeShape(pipe)) {
+      const err = hasItemsOverride(pipe)
+        ? 'itemsOverride is not allowed on the public API'
+        : validatePipeShape(pipe);
+      reply.code(400).send({ error: err });
+      return;
+    }
+
+    const gate = gateExpensiveRun(clientIp(request));
+    reply.header('X-RateLimit-Remaining', String(gate.remaining));
+    if (!gate.allowed) {
+      sendRateLimited(reply, gate, 'Too many pipe runs. Please try again later.');
+      return;
+    }
+
+    let stored = pipe;
+    if (persist) {
+      const prepared = preparePipe(pipe, pipesStore);
+      if (prepared.error || !prepared.pipe) {
+        reply.code(400).send({ error: prepared.error });
+        return;
+      }
+      stored = prepared.pipe;
+      pipesStore.set(stored.id, stored);
+      void savePipesToFile();
+    }
+
+    try {
+      const startTime = Date.now();
+      const result = await runPipeBounded(() => runFn(stored));
+      const durationMs = Date.now() - startTime;
+      const base = publicBaseUrl(request, port);
+      reply.code(200).send({
+        output: result.output,
+        itemsByNode: result.itemsByNode,
+        durationMs,
+        rateLimit: {
+          remaining: gate.remaining,
+          resetMs: gate.resetMs,
+        },
+        ...(persist
+          ? {
+              pipeId: stored.id,
+              exports: {
+                json: `${base}/p/${stored.id}.json`,
+                rss: `${base}/p/${stored.id}.rss`,
+              },
+            }
+          : {}),
+      });
+    } catch (error: any) {
+      const message = error?.message || 'Failed to run pipe';
+      const timedOut = /timed out/i.test(message);
+      reply.code(timedOut ? 504 : 400).send({
+        error: 'Failed to run pipe',
+        message,
+      });
+    }
+  }
+
+  // Run a pipe from the request body (preferred). Optional persist creates an ephemeral export id.
+  app.post('/api/pipes/run', async (request, reply) => {
+    const body = (request.body || {}) as { pipe?: PipeDefinition; persist?: boolean };
+    const pipe = body.pipe;
+    if (!pipe) {
+      reply.code(400).send({ error: 'Pipe definition is required' });
+      return;
+    }
+    await executeRun(pipe, request, reply, body.persist !== false);
+  });
+
+  app.post('/api/pipes/:id/run', async (request, reply) => {
     const { id } = request.params as { id: string };
-    
+    const pipe = pipesStore.get(id);
+    if (!pipe) {
+      reply.code(404).send({ error: 'Pipe not found' });
+      return;
+    }
+    await executeRun(pipe, request, reply, false);
+  });
+
+  async function exportPipe(
+    request: any,
+    reply: any,
+    format: 'json' | 'rss',
+  ) {
+    const { id } = request.params as { id: string };
+    const gate = gateExpensiveRun(clientIp(request));
+    reply.header('X-RateLimit-Remaining', String(gate.remaining));
+    if (!gate.allowed) {
+      sendRateLimited(reply, gate, 'Too many export requests. Please try again later.');
+      return;
+    }
+
     if (!pipesStore.has(id)) {
       reply.code(404).send({ error: 'Pipe not found' });
       return;
     }
 
-    pipesStore.delete(id);
-    savePipesToFile();
-
-    reply.code(204).send();
-  });
-
-  // POST /api/pipes/:id/run - Run a pipe
-  app.post('/api/pipes/:id/run', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const pipe = pipesStore.get(id);
-
-    if (!pipe) {
-      reply.code(404).send({ error: 'Pipe not found' });
+    const cacheKey = `${id}:${format}`;
+    const cached = exportCache.get(cacheKey);
+    if (cached && cached.expires > Date.now()) {
+      reply
+        .code(200)
+        .header('Content-Type', format === 'rss' ? 'application/rss+xml' : 'application/json')
+        .send(cached.body);
       return;
     }
 
-    // Apply rate limiting
-    const clientIp = request.ip || request.headers['x-forwarded-for'] || 'unknown';
-    const rateLimitResult = checkRateLimit(clientIp as string, { windowMs: 60000, max: 30 });
-
-    if (!rateLimitResult.allowed) {
-      reply.code(429).header('Retry-After', Math.ceil(rateLimitResult.resetMs / 1000).toString());
-      reply.send({
-        error: 'Rate limit exceeded',
-        message: 'Too many requests. Please try again later.',
-        retryAfterMs: rateLimitResult.resetMs,
-        remaining: 0,
-      });
+    const pipe = pipesStore.get(id)!;
+    if (hasItemsOverride(pipe)) {
+      reply.code(400).send({ error: 'itemsOverride is not allowed on the public API' });
       return;
     }
 
     try {
-      const startTime = Date.now();
-      const result = await runPipe(pipe);
-      const durationMs = Date.now() - startTime;
-
-      reply.code(200).header('X-RateLimit-Remaining', rateLimitResult.remaining.toString());
-      reply.send({
-        output: result.output,
-        itemsByNode: result.itemsByNode,
-        durationMs,
-        rateLimit: {
-          remaining: rateLimitResult.remaining,
-          resetMs: rateLimitResult.resetMs,
-        },
-      });
+      const result = await runPipeBounded(() => runFn(pipe));
+      let body: unknown = result.output;
+      if (format === 'rss') {
+        body = itemsToRss20(result.output, {
+          title: `${pipe.name} - Pipes from the Grave`,
+          link: `${publicBaseUrl(request, port)}/p/${pipe.id}.rss`,
+          description: `RSS feed generated from pipe: ${pipe.name}`,
+          generator: 'pipes-from-the-grave',
+        });
+      }
+      exportCache.set(cacheKey, { body, expires: Date.now() + 60_000 });
+      reply
+        .code(200)
+        .header('Content-Type', format === 'rss' ? 'application/rss+xml' : 'application/json')
+        .send(body);
     } catch (error: any) {
-      // Keep SSRF messages intact
-      reply.code(400).send({
+      const message = error?.message || 'Failed to run pipe';
+      const timedOut = /timed out/i.test(message);
+      reply.code(timedOut ? 504 : 400).send({
         error: 'Failed to run pipe',
-        message: error.message,
+        message,
       });
     }
-  });
+  }
+
+  app.get('/p/:id.json', (request, reply) => exportPipe(request, reply, 'json'));
+  app.get('/p/:id.rss', (request, reply) => exportPipe(request, reply, 'rss'));
 }
+
+export { httpLimits };

@@ -71,7 +71,7 @@ Approximate spoken length is noted after each voice-over. Leave a beat for click
 **Action (cut, keep it brisk):**
 
 1. Terminal: API already running; `npm run dev:mcp` with the “MCP server started” line visible. No secrets on screen.
-2. Kiro: open `.kiro/settings/mcp.json` (the `pipes` server pointing at `packages/mcp`). Show a `tools/list` result or a short `tools/call` of `list_nodes` or `ghost_build` — only the tool names (`list_nodes`, `list_pipes`, `get_pipe`, `create_pipe`, `add_node`, `add_connection`, `run_pipe`, `delete_pipe`, `ghost_build`).
+2. Kiro: open `.kiro/settings/mcp.json` (the `pipes` server pointing at `packages/mcp`). Show a `tools/list` result or a short `tools/call` of `list_nodes` or `ghost_build` — only the tool names (`list_nodes`, `get_pipe`, `create_pipe`, `add_node`, `add_connection`, `run_pipe`, `ghost_build`).
 3. File tree: open `.kiro/steering/product.md` (one heading), `.kiro/specs/pipe-engine/tasks.md` or `mcp-server` tasks, and `.kiro/hooks/README.md` (the intended hook recipes). Do not claim hook JSON files are installed; the README is what is in the repo.
 
 **Voice-over:** “Agents talk to the same pipes through an MCP server — list nodes, build, and run. We designed this in Kiro: steering for voice and stack, specs for the engine and MCP tools, and hook recipes that say ‘new node, add a test.’ Property-based tests guard the transforms.”

@@ -145,9 +145,9 @@ function toFlow(pipe: PipeDefinition, animated = true): { nodes: Node[]; edges: 
   return { nodes, edges }
 }
 
-function fromFlow(name: string, nodes: Node[], edges: Edge[]): PipeDefinition {
+function fromFlow(name: string, nodes: Node[], edges: Edge[], existingId?: string | null): PipeDefinition {
   return {
-    id: name.toLowerCase().replace(/\s+/g, '-') || 'draft',
+    ...(existingId ? { id: existingId } : {}),
     name,
     nodes: nodes.map((n) => ({
       id: n.id,
@@ -157,6 +157,16 @@ function fromFlow(name: string, nodes: Node[], edges: Edge[]): PipeDefinition {
     })),
     edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
   }
+}
+
+function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 async function readApiError(res: Response): Promise<{ message: string; status: number; retryAfterMs?: number }> {
@@ -214,6 +224,7 @@ export default function App() {
   const prefersReducedMotion = usePrefersReducedMotion()
   const allowMotion = !prefersReducedMotion && !pauseMotion
   const ghostPromptRef = useRef<HTMLTextAreaElement>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const saved = loadGhostByok()
@@ -393,25 +404,19 @@ export default function App() {
     setStatus('Spirits are running the pipe...')
     setRunMeta({})
     try {
-      const pipe = fromFlow(pipeName, nodes, edges)
-      const saveRes = await fetch(apiUrl('/api/pipes'), {
+      const pipe = fromFlow(pipeName, nodes, edges, savedPipeId)
+      const runRes = await fetch(apiUrl('/api/pipes/run'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pipe),
+        body: JSON.stringify({ pipe, persist: true }),
       })
-      if (!saveRes.ok) {
-        const err = await readApiError(saveRes)
-        throw Object.assign(new Error(err.message), { status: err.status })
-      }
-      const saved = await saveRes.json()
-      setSavedPipeId(saved.id)
-      const runRes = await fetch(apiUrl(`/api/pipes/${saved.id}/run`), { method: 'POST' })
       if (!runRes.ok) {
         const err = await readApiError(runRes)
         setRunMeta({ error: err.message, status: err.status, resetMs: err.retryAfterMs })
         throw Object.assign(new Error(err.message), { status: err.status })
       }
       const result = await runRes.json()
+      if (typeof result.pipeId === 'string') setSavedPipeId(result.pipeId)
       const byNode = (result.itemsByNode || {}) as Record<string, Array<Record<string, unknown>>>
       setOutputs(result.output || [])
       setItemsByNode(byNode)
@@ -424,7 +429,12 @@ export default function App() {
         resetMs: result.rateLimit?.resetMs,
       })
       const n = (result.output || []).length
-      setStatus(`Returned ${n} souls in ${result.durationMs ?? '?'} ms. Graveyard exports: ${apiUrl(`/p/${saved.id}.json`)}`)
+      const exportUrl = result.exports?.json || (result.pipeId ? apiUrl(`/p/${result.pipeId}.json`) : '')
+      setStatus(
+        exportUrl
+          ? `Returned ${n} souls in ${result.durationMs ?? '?'} ms. Temporary export (gone after the host sleeps): ${exportUrl}`
+          : `Returned ${n} souls in ${result.durationMs ?? '?'} ms.`,
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setStatus(`The séance failed: ${msg}`)
@@ -432,6 +442,38 @@ export default function App() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const exportPipeJson = () => {
+    const pipe = fromFlow(pipeName, nodes, edges, savedPipeId)
+    const slug = (pipeName || 'pipe').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pipe'
+    downloadJson(`${slug}.json`, pipe)
+    setStatus('Downloaded this pipe as JSON. Keep a copy if you need it after the demo host sleeps.')
+  }
+
+  const importPipeJson = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || '')) as PipeDefinition
+        if (!parsed || !Array.isArray(parsed.nodes)) {
+          throw new Error('This file is not a pipe JSON object.')
+        }
+        const flow = toFlow(parsed, allowMotion)
+        setPipeName(parsed.name || 'Untitled Pipe')
+        setNodes(flow.nodes)
+        setEdges(flow.edges)
+        setItemsByNode({})
+        setOutputs([])
+        setRunMeta({})
+        setSavedPipeId(null)
+        setDraftTouched(true)
+        setStatus(`Loaded "${parsed.name || 'Untitled Pipe'}" from JSON.`)
+      } catch (err) {
+        setStatus(`Could not load that JSON: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    reader.readAsText(file)
   }
 
   const callGhost = async () => {
@@ -529,6 +571,19 @@ export default function App() {
             Debug Souls
           </button>
           <button onClick={runPipe} disabled={busy || nodes.length === 0}>Run</button>
+          <button type="button" onClick={exportPipeJson} disabled={nodes.length === 0}>Download JSON</button>
+          <button type="button" onClick={() => importFileRef.current?.click()} disabled={busy}>Load JSON</button>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) importPipeJson(file)
+              e.target.value = ''
+            }}
+          />
           {!prefersReducedMotion && (
             <button
               type="button"
@@ -546,6 +601,10 @@ export default function App() {
           Waking the demo host can take about a minute. Please wait…
         </div>
       )}
+
+      <div role="note" style={{ background: '#16161f', color: '#c8d0cc', padding: '8px 16px', borderBottom: '1px solid #2a2a35', fontSize: 13 }}>
+        Server-saved pipes and export links last only until this demo host sleeps. Your browser draft and Graveyard templates stay on this device — use Download JSON if you want a copy you can load later.
+      </div>
 
       {runMeta.error && (
         <div role="alert" style={{ background: '#3a1518', color: '#ffb0b8', padding: '8px 16px', borderBottom: '1px solid #66222a' }}>

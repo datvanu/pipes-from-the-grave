@@ -6,9 +6,12 @@ services:
     runtime: node
     plan: free
     buildCommand: npm ci && npm run build -w @pipes/web
-    startCommand: npx tsx apps/server/src/index.ts
+    startCommand: ./node_modules/.bin/tsx apps/server/src/index.ts
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: GHOST_MODE
         value: demo
+      - key: TRUST_PROXY
+        value: "1"

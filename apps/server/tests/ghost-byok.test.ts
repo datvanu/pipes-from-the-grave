@@ -46,12 +46,17 @@ function loggerSink() {
 }
 
 describe('Ghost BYOK', () => {
+  const previousGhostMode = process.env.GHOST_MODE;
+
   beforeEach(() => {
     rateLimiter.clear();
+    delete process.env.GHOST_MODE;
   });
 
   afterEach(() => {
     rateLimiter.clear();
+    if (previousGhostMode === undefined) delete process.env.GHOST_MODE;
+    else process.env.GHOST_MODE = previousGhostMode;
   });
 
   it('uses rule-based demo mode when no key is sent', async () => {
@@ -177,4 +182,28 @@ describe('Ghost BYOK', () => {
     expect(JSON.stringify(body)).not.toContain('Authorization');
     await app.close();
   });
+
+  it('does not forward a visitor key when GHOST_MODE is demo', async () => {
+    process.env.GHOST_MODE = 'demo';
+    let called = false;
+    const llmFetch: typeof fetch = async () => {
+      called = true;
+      return new Response('{}', { status: 200 });
+    };
+    const app = await createApp({ logger: false, llmFetch });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ghost',
+      headers: { 'x-ghost-llm-key': SECRET },
+      payload: { prompt: 'fetch rss about rust, sort, top 5' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.mode).toBe('demo');
+    expect(body.fallbackReason).toMatch(/demo mode/i);
+    expect(called).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    await app.close();
+  });
+
 });

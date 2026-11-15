@@ -9,7 +9,7 @@ The jury needs a URL to a running app until the end of judging (29 January 2027)
 | Part | Stack | Notes |
 |---|---|---|
 | Web editor | Vite → static `apps/web/dist` | React + React Flow. Talks to `/api/*`. |
-| API | Fastify (`apps/server`) | CRUD, `/api/ghost` (demo mode), `/api/pipes/:id/run`, public `/p/:id.json` and `/p/:id.rss`. Listens on `PORT` (default 8787), host `0.0.0.0`. |
+| API | Fastify (`apps/server`) | `POST /api/pipes` (server-assigned UUID, no public list or delete), `POST /api/pipes/run`, `/api/ghost` (demo mode; `GHOST_MODE=demo` blocks visitor-key forwarding), public `/p/:id.json` and `/p/:id.rss` with rate limits. Listens on `PORT` (default 8787), host `0.0.0.0`. |
 | Pipe engine | `@pipes/engine` (TypeScript) | Runs on the server. Browser fetches to third-party RSS/JSON feeds would fail CORS, so the engine should stay on the API. |
 | MCP | stdio (`packages/mcp`) | For local Kiro/agents only. Not required on the public demo URL. |
 
@@ -17,14 +17,14 @@ The API can also serve the Vite build (and falls back to `index.html` for non-AP
 
 ## Recommendation (no cost for a jury demo)
 
-**One free Render web service** that builds the Vite app and starts the Fastify server with `npx tsx apps/server/src/index.ts`. The same origin serves UI and API, so `VITE_API_BASE` can stay empty and CORS stays simple.
+**One free Render web service** that builds the Vite app and starts the Fastify server with `./node_modules/.bin/tsx apps/server/src/index.ts` (`tsx` is a runtime dependency, so `npm ci --omit=dev` still starts). The same origin serves UI and API, so `VITE_API_BASE` can stay empty and CORS stays simple. `render.yaml` sets `healthCheckPath: /api/health` and `TRUST_PROXY=1`.
 
 - **Cost:** $0 on Render’s Free compute plan (0.1 CPU, 512 MB RAM).
 - **Account needed:** a Render account (new). GitHub org `datvanu` can be connected later so Render builds from the public repo — that still needs a separate approval to make the repo public and to connect the account.
 - **Limits (as of November 2026, [Render Free docs](https://render.com/docs/free)):**
   - Spins down after 15 minutes idle; the next request takes about one minute to wake the service (Render shows a loading page). Fine for a jury link; mention the cold start in the Devpost test instructions.
   - 750 Free instance hours per workspace per calendar month (idle time does not count). One service that only runs while people visit it should stay inside this cap.
-  - Ephemeral filesystem: saved pipes are lost on restart or spin-down. Acceptable for a demo (in-memory / `apps/server/data` is not durable anyway).
+  - Ephemeral filesystem: saved pipes and `/p/:id.*` export links are lost on restart or spin-down. The UI warns about this. Browser drafts and Graveyard templates survive. Acceptable for a demo (in-memory / `apps/server/data` is not durable anyway).
   - Free web services and static sites count against the workspace’s included outbound bandwidth and build pipeline minutes. If those are exhausted and no payment method is on file, Render suspends free services or new builds rather than charging. Do not add a card unless Kilian approves possible overage billing.
   - Free Postgres is **not** needed and would expire after 30 days.
 
@@ -48,7 +48,7 @@ The engine is TypeScript and could be bundled into the Vite app, and `jsonplaceh
 
 ```bash
 docker build -t pipes-from-the-grave .
-docker run --rm -p 8787:8787 -e GHOST_MODE=demo pipes-from-the-grave
+docker run --rm -p 8787:8787 -e GHOST_MODE=demo -e TRUST_PROXY=1 pipes-from-the-grave
 # open http://localhost:8787/
 ```
 
@@ -70,11 +70,13 @@ See `.env.example`. For a single-service deploy the important values are:
 | Variable | Demo value |
 |---|---|
 | `PORT` | Injected by the host, or `8787` |
-| `GHOST_MODE` | `demo` |
-| _(no LLM API key)_ | never set on the host; BYOK keys stay in the visitor’s browser |
+| `GHOST_MODE` | `demo` (disables visitor-key forwarding on this host) |
+| `TRUST_PROXY` | `1` (so rate limits key off the client, not the Render proxy) |
+| _(no LLM API key)_ | never set on the host; visitor keys stay in the browser and are not forwarded while `GHOST_MODE=demo` |
 | `CORS_ORIGINS` | not required when the UI is served from the same origin; set it if the UI is on Pages |
 | `WEB_DIST_DIR` | unset (defaults to `apps/web/dist`) |
 | `VITE_API_BASE` | empty for same-origin |
+| `PUBLIC_BASE_URL` | optional; RSS channel links otherwise use the request host |
 
 ## Accounts and approvals still required
 

@@ -194,20 +194,18 @@ describe('MCP tools/list via stdio', () => {
     expect(listed.error).toBeUndefined();
     const tools = listed.result.tools as Array<{ name: string; description: string; inputSchema: unknown }>;
     expect(Array.isArray(tools)).toBe(true);
-    expect(tools.length).toBeGreaterThanOrEqual(8);
+    expect(tools.length).toBeGreaterThanOrEqual(7);
 
     const names = tools.map((t) => t.name);
     expect(new Set(names).size, 'duplicate tool names').toBe(names.length);
 
     const expected = [
       'list_nodes',
-      'list_pipes',
       'get_pipe',
       'create_pipe',
       'add_node',
       'add_connection',
       'run_pipe',
-      'delete_pipe',
       'ghost_build',
     ];
     expect(names.sort()).toEqual([...expected].sort());
@@ -228,7 +226,7 @@ describe('MCP tools/list via stdio', () => {
 
     const unknownTool = await client.request('tools/call', { name: 'not_a_tool', arguments: {} }, 4);
     expect(unknownTool.error).toBeDefined();
-    expect(unknownTool.error?.code).toBe(-32601);
+    expect(unknownTool.error?.code).toBe(-32602);
   });
 
   it('calls list_nodes via tools/call', async () => {
@@ -238,6 +236,13 @@ describe('MCP tools/list via stdio', () => {
     const body = JSON.parse(res.result.content[0].text);
     expect(body.nodeTypes.length).toBeGreaterThan(0);
     expect(body.nodeTypes.map((n: { type: string }) => n.type)).toContain('fetch-rss');
+  });
+
+  it('returns a tools/call result with isError when get_pipe is missing pipeId', async () => {
+    const res = await client.request('tools/call', { name: 'get_pipe', arguments: {} }, 6);
+    expect(res.error).toBeUndefined();
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toMatch(/pipeId/i);
   });
 });
 
@@ -273,7 +278,8 @@ describe('MCP tools/call against a running API', () => {
     expect(listed.error).toBeUndefined();
     const names = (listed.result.tools as Array<{ name: string }>).map((t) => t.name);
     expect(names).toContain('ghost_build');
-    expect(names).toContain('list_pipes');
+    expect(names).not.toContain('list_pipes');
+    expect(names).not.toContain('delete_pipe');
 
     const call = await client.request(
       'tools/call',

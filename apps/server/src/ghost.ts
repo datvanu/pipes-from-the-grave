@@ -297,7 +297,7 @@ export function buildPipeFromPrompt(
       node.position = { x: 80 + i * 220, y: 120 };
     });
     const pipe: PipeDefinition = {
-      id: `ghost-${Date.now()}`,
+      id: crypto.randomUUID(),
       name: nameFromPrompt(prompt),
       nodes,
       edges,
@@ -361,7 +361,7 @@ export function buildPipeFromPrompt(
   explanation.push(EXPLANATIONS.complete);
 
   const pipe: PipeDefinition = {
-    id: `ghost-${Date.now()}`,
+    id: crypto.randomUUID(),
     name: nameFromPrompt(prompt),
     nodes,
     edges,

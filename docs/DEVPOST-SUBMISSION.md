@@ -60,14 +60,14 @@ Pipes from the Grave is a browser editor for feed and data pipes.
 - Open **Ghost Séance**, type a sentence, and **Summon** a pipe. The default is a **free, rule-based demo** that maps keywords in the prompt to nodes. No API key is required. Optionally, a visitor may paste **their own** key for an allowlisted model provider. That key stays in the browser (session storage, or local storage only if they opt in), is sent to that provider only as a request header when they click Summon, and is not stored on the server. If the provider call fails, the Ghost falls back to the demo.
 - **Run** executes the pipe on the server (SSRF-safe fetches, timeouts, rate limits). **Séance Debug** shows how many “souls” (items) passed each node. The output list is also shown in the editor.
 - Saved pipes are exported, without a login, at `/p/:id.json` and `/p/:id.rss`.
-- An MCP stdio server exposes tools (`list_nodes`, `list_pipes`, `get_pipe`, `create_pipe`, `add_node`, `add_connection`, `run_pipe`, `delete_pipe`, `ghost_build`) so Kiro or another agent can list, build, and run pipes against the same API.
+- An MCP stdio server exposes tools (`list_nodes`, `get_pipe`, `create_pipe`, `add_node`, `add_connection`, `run_pipe`, `ghost_build`) so Kiro or another agent can build and run pipes against the same API. There is no public list or delete of server pipes; create returns an unguessable id.
 
 ## How we built it
 
 A TypeScript npm-workspace monorepo:
 
 - `@pipes/engine` — pipe runner, node library, SSRF checks, RSS/JSON serialization, Vitest plus fast-check property tests.
-- `@pipes/server` — Fastify API (`/api/pipes`, `/api/ghost`, public `/p/:id.json|.rss`), rate limits, optional static hosting of the Vite build.
+- `@pipes/server` — Fastify API (`POST /api/pipes` and `POST /api/pipes/run`, `/api/ghost`, ephemeral public `/p/:id.json|.rss`), rate limits, optional static hosting of the Vite build.
 - `@pipes/web` — Vite, React, and React Flow editor (graveyard, ghost séance, inspector, séance debug).
 - `@pipes/mcp` — newline-delimited JSON-RPC MCP server (`tools/list`, `tools/call`) that prefers the live HTTP API.
 
@@ -100,7 +100,7 @@ Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding,
 - A complete editor loop the jury can try: template or Ghost, run, inspect souls, export JSON and RSS, with no account and no key.
 - An MCP tool surface that matches the API, with tests for the tool list and a live `tools/call`.
 - Steering, specs, hook notes, and a custom agent committed under `/.kiro` at the repo root, plus an honest usage log of what Kiro did and what people fixed afterwards.
-- Property-based and unit tests around the engine, rate limits, Ghost prompts, and MCP (78 tests in the current workspace run).
+- Property-based and unit tests around the engine, rate limits, Ghost prompts, and MCP (87 tests in the current workspace run).
 
 ## What we learned
 
@@ -114,9 +114,9 @@ Publish the GitHub repository, host the jury demo (pending approval), and record
 
 1. Open `{{DEMO_URL}}`. If nobody has used the demo for a few minutes, the free host may take about one minute to wake. You should see the host’s loading page — please wait instead of refreshing right away.
 2. Click **Graveyard**, pick **Frontpage Digest**, click **Run**, and wait for Séance Output. This is the first proven path.
-3. Click **Ghost Séance**. Leave the key field empty. Use a prompt that the demo rules can parse, for example: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click Summon, check that the Fetch URL in the inspector has no trailing comma, then click Run. Optionally open `/p/<id>.json` or `.rss` from the footer.
+3. Click **Ghost Séance**. Leave the key field empty. Use a prompt that the demo rules can parse, for example: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click Summon, check that the Fetch URL in the inspector has no trailing comma, then click Run. Optionally open `/p/<id>.json` or `.rss` from the footer. Those export links, and any server-saved pipe, last only until the free host sleeps; your browser draft and the Graveyard templates remain. Use **Download JSON** if you want a copy you can **Load JSON** later.
 The default Ghost is rule-based: it looks for simple keywords. You do not need a key. A personal key is optional, stays in your browser, and is never required to try the editor.
-4. No sign-in is required. A personal key is optional, stays in your browser, and is sent only to the provider you pick when you Summon.
+4. No sign-in is required. A personal key is optional, stays in your browser, and is sent only to the provider you pick when you Summon. The hosted demo is in demo mode and does not forward visitor keys.
 
 To run from source: Node 20+, `npm install`, `npm run dev` (or `npm run dev:all`). See the README.
 

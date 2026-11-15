@@ -54,6 +54,7 @@ Copy `.env.example` if you want to override ports or CORS. See [docs/HOSTING.md]
 | `npm test` | Run workspace tests (engine, server, MCP) |
 | `npm run build` | Build workspaces |
 | `npm run dev` / `npm run dev:all` | API (8787) and web UI (5173) together |
+| `npm start` | Production-style API start (`tsx`, a runtime dependency) |
 | `npm run dev:mcp` | Start the MCP stdio server |
 
 ## Demo mode and optional BYOK (Ghost)
@@ -62,7 +63,7 @@ Copy `.env.example` if you want to override ports or CORS. See [docs/HOSTING.md]
 
 The default is **demo mode**: a rule-based builder that maps keywords in the prompt to nodes. It needs no LLM and no secrets. The JSON response includes `"mode": "demo"`.
 
-Optionally, a visitor may bring their own key for an allowlisted OpenAI-compatible provider. The key stays in the browser (session storage, or local storage only if they opt in) and is sent only as the `X-Ghost-LLM-Key` request header. The server forwards that header once to the hardcoded provider URL, then forgets it. Keys are never stored, logged, or returned. If the provider call fails, the Ghost falls back to demo mode and sets `fallbackReason`. There is no project- or host-owned API key.
+Optionally, a visitor may bring their own key for an allowlisted model provider. The key stays in the browser (session storage, or local storage only if they opt in) and is sent only as the `X-Ghost-LLM-Key` request header. The server forwards that header once to the hardcoded provider URL, then forgets it — except when `GHOST_MODE=demo`, which is the hosted-demo setting and disables forwarding entirely. Keys are never stored, logged, or returned. If the provider call fails, the Ghost falls back to demo mode and sets `fallbackReason`. There is no project- or host-owned API key.
 
 The MCP `ghost_build` tool does not accept a key and always uses demo mode, so a key cannot leak through an agent session.
 
@@ -78,20 +79,20 @@ npm run dev:server
 npm run dev:mcp
 ```
 
-The server speaks MCP JSON-RPC over stdio (`initialize`, `tools/list`, `tools/call`). It prefers the running HTTP API at `PIPES_API_BASE` (default `http://127.0.0.1:8787`) and falls back to an in-process store for most tools if the API is down (`ghost_build` needs the API).
+The server speaks MCP JSON-RPC over stdio (`initialize`, `tools/list`, `tools/call`), **newline-delimited** (one JSON message per line, not Content-Length framing). It prefers the running HTTP API at `PIPES_API_BASE` (default `http://127.0.0.1:8787`) and falls back to an in-process store for most tools if the API is down (`ghost_build` needs the API).
+
+The public API does not list or delete pipes. `create_pipe` returns a server-assigned unguessable id; `run_pipe` can send a pipe body or that id. There are no `list_pipes` or `delete_pipe` tools, so `tools/list` matches what the server can actually do.
 
 Tools:
 
 | Tool | Purpose |
 |---|---|
 | `list_nodes` | List engine node types |
-| `list_pipes` | List saved pipes |
-| `get_pipe` | Fetch a pipe definition by id |
-| `create_pipe` | Create or update a pipe |
-| `add_node` | Add a node to a pipe |
+| `get_pipe` | Fetch a pipe definition by its unguessable id |
+| `create_pipe` | Create a pipe (server assigns the id; updates only an existing id) |
+| `add_node` | Add a node to a pipe you already created |
 | `add_connection` | Add an edge between nodes |
-| `run_pipe` | Execute a saved pipe |
-| `delete_pipe` | Delete a pipe |
+| `run_pipe` | Run a pipe by id, or by sending the pipe in the tool arguments |
 | `ghost_build` | Build a pipe from a sentence (demo mode by default) |
 
 Configured for Kiro in `.kiro/settings/mcp.json`.

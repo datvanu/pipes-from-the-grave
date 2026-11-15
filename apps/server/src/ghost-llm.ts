@@ -135,7 +135,7 @@ function normalizePipe(raw: any, prompt: string): PipeDefinition {
     .map((e: any) => ({ id: String(e.id), source: String(e.source), target: String(e.target) }));
 
   const pipe: PipeDefinition = {
-    id: `ghost-${Date.now()}`,
+    id: crypto.randomUUID(),
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 80) : prompt.split('.')[0].slice(0, 50) || 'Ghost-Built Pipe',
     nodes,
     edges,

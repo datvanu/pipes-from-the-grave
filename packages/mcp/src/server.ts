@@ -2,6 +2,9 @@
  * @pipes/mcp — MCP stdio server (JSON-RPC 2.0, newline-delimited).
  * Prefers the running HTTP API (PIPES_API_BASE, default http://127.0.0.1:8787).
  * Falls back to an in-process store + engine if the server is unreachable.
+ *
+ * Framing is newline-delimited JSON-RPC (one message per line), not
+ * Content-Length. There is no public list or delete of server pipes.
  */
 
 import type { PipeDefinition, PipeNode, PipeEdge } from '@pipes/engine';
@@ -96,11 +99,6 @@ export const TOOLS: McpTool[] = [
     inputSchema: { ...emptyInputSchema },
   },
   {
-    name: 'list_pipes',
-    description: 'List saved pipes (id, name, node and edge counts, timestamps). Uses the HTTP API when it is reachable.',
-    inputSchema: { ...emptyInputSchema },
-  },
-  {
     name: 'get_pipe',
     description: 'Fetch the full definition of a saved pipe by id.',
     inputSchema: {
@@ -114,7 +112,7 @@ export const TOOLS: McpTool[] = [
   },
   {
     name: 'create_pipe',
-    description: 'Create or update a pipe from a full definition (name, nodes, edges).',
+    description: 'Create a pipe from a full definition (name, nodes, edges). The server assigns an unguessable id; a client id is honoured only if that pipe already exists. There is no public pipe list or delete.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -152,25 +150,14 @@ export const TOOLS: McpTool[] = [
   },
   {
     name: 'run_pipe',
-    description: 'Execute a saved pipe and return its output items, per-node items, and duration.',
+    description: 'Execute a pipe and return its output items, per-node items, and duration. Pass a saved pipeId, or a full pipe definition to run without listing the shared store.',
     inputSchema: {
       type: 'object',
       properties: {
-        pipeId: { type: 'string', description: 'Id of the pipe to run' },
+        pipeId: { type: 'string', description: 'Id of a previously created pipe' },
+        pipe: pipeSchema,
+        persist: { type: 'boolean', description: 'When sending a pipe body, also keep an ephemeral server copy for export links (default true)' },
       },
-      required: ['pipeId'],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'delete_pipe',
-    description: 'Delete a saved pipe by id.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        pipeId: { type: 'string', description: 'Id of the pipe to delete' },
-      },
-      required: ['pipeId'],
       additionalProperties: false,
     },
   },
@@ -255,25 +242,6 @@ function handleListNodes(): unknown {
   };
 }
 
-async function handleListPipes(): Promise<unknown> {
-  if (await serverHealthy()) {
-    const r = await apiFetch('/api/pipes');
-    if (!r.ok) throw new Error(r.body?.message || r.body?.error || `list_pipes HTTP ${r.status}`);
-    return r.body;
-  }
-  return {
-    pipes: Array.from(pipesStore.values()).map((p) => ({
-      id: p.id,
-      name: p.name,
-      nodes: p.nodes.length,
-      edges: p.edges.length,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    })),
-    mode: 'local-fallback',
-  };
-}
-
 async function handleGetPipe(params: any): Promise<unknown> {
   if (!params || typeof params.pipeId !== 'string' || !params.pipeId) {
     throw new Error('Missing pipeId parameter');
@@ -296,9 +264,10 @@ async function handleCreatePipe(params: any): Promise<unknown> {
   if (!pipe.name) throw new Error('Pipe must have a name');
   if (!Array.isArray(pipe.nodes)) pipe.nodes = [];
   if (!Array.isArray(pipe.edges)) pipe.edges = [];
-  if (!pipe.id) pipe.id = `pipe-${Date.now()}`;
+  const existing = typeof pipe.id === 'string' && pipesStore.has(pipe.id) ? pipesStore.get(pipe.id) : undefined;
+  if (!existing) pipe.id = crypto.randomUUID();
   pipe.updatedAt = new Date().toISOString();
-  pipe.createdAt = pipe.createdAt || pipe.updatedAt;
+  pipe.createdAt = existing?.createdAt || pipe.createdAt || pipe.updatedAt;
 
   if (await serverHealthy()) {
     const r = await apiFetch('/api/pipes', { method: 'POST', body: JSON.stringify(pipe) });
@@ -311,12 +280,17 @@ async function handleCreatePipe(params: any): Promise<unknown> {
 }
 
 async function handleRunPipe(params: any): Promise<unknown> {
-  if (!params || typeof params.pipeId !== 'string' || !params.pipeId) {
-    throw new Error('Missing pipeId parameter');
-  }
+  const pipeBody = params?.pipe;
+  const pipeId = typeof params?.pipeId === 'string' ? params.pipeId : '';
+  if (!pipeBody && !pipeId) throw new Error('Missing pipe or pipeId parameter');
 
   if (await serverHealthy()) {
-    const r = await apiFetch(`/api/pipes/${encodeURIComponent(params.pipeId)}/run`, { method: 'POST' });
+    const r = pipeBody
+      ? await apiFetch('/api/pipes/run', {
+          method: 'POST',
+          body: JSON.stringify({ pipe: pipeBody, persist: params.persist !== false }),
+        })
+      : await apiFetch(`/api/pipes/${encodeURIComponent(pipeId)}/run`, { method: 'POST' });
     if (r.status === 429) {
       throw new Error(
         `Rate limit exceeded (retryAfterMs=${r.body?.retryAfterMs ?? '?'}): ${r.body?.message || 'too many requests'}`,
@@ -326,8 +300,8 @@ async function handleRunPipe(params: any): Promise<unknown> {
     return { ...r.body, mode: 'http' };
   }
 
-  const pipe = pipesStore.get(params.pipeId);
-  if (!pipe) throw new Error(`Pipe not found locally: ${params.pipeId} (is the API server running on ${API_BASE}?)`);
+  const pipe = pipeBody || pipesStore.get(pipeId);
+  if (!pipe) throw new Error(`Pipe not found locally: ${pipeId} (is the API server running on ${API_BASE}?)`);
   const { runPipe } = await import('@pipes/engine');
   const result = await runPipe(pipe);
   return { ...result, mode: 'local-fallback' };
@@ -383,22 +357,6 @@ async function handleAddConnection(params: any): Promise<unknown> {
   return { connection, mode: 'local-fallback' };
 }
 
-async function handleDeletePipe(params: any): Promise<unknown> {
-  if (!params || typeof params.pipeId !== 'string' || !params.pipeId) {
-    throw new Error('Missing pipeId parameter');
-  }
-
-  if (await serverHealthy()) {
-    const r = await apiFetch(`/api/pipes/${encodeURIComponent(params.pipeId)}`, { method: 'DELETE' });
-    if (!r.ok && r.status !== 204) throw new Error(r.body?.error || `delete HTTP ${r.status}`);
-    return { success: true, mode: 'http' };
-  }
-
-  if (!pipesStore.has(params.pipeId)) throw new Error(`Pipe not found: ${params.pipeId}`);
-  pipesStore.delete(params.pipeId);
-  return { success: true, mode: 'local-fallback' };
-}
-
 async function handleGhost(params: any): Promise<unknown> {
   if (!params || typeof params.prompt !== 'string' || !params.prompt) {
     throw new Error('Missing prompt parameter');
@@ -415,8 +373,6 @@ async function callTool(name: string, args: any): Promise<unknown> {
   switch (name) {
     case 'list_nodes':
       return handleListNodes();
-    case 'list_pipes':
-      return handleListPipes();
     case 'get_pipe':
       return handleGetPipe(args);
     case 'create_pipe':
@@ -427,8 +383,6 @@ async function callTool(name: string, args: any): Promise<unknown> {
       return handleAddConnection(args);
     case 'run_pipe':
       return handleRunPipe(args);
-    case 'delete_pipe':
-      return handleDeletePipe(args);
     case 'ghost_build':
       return handleGhost(args);
     default:
@@ -473,7 +427,7 @@ export async function handleRequest(request: any): Promise<void> {
           serverInfo: SERVER_INFO,
           capabilities: { tools: {} },
           instructions:
-            `Pipes from the Grave MCP server. Default Ghost mode is the rule-based demo (no LLM key). API base: ${API_BASE}.`,
+            `Pipes from the Grave MCP server. Default Ghost mode is the rule-based demo (no LLM key). API base: ${API_BASE}. Frames messages as newline-delimited JSON-RPC. The public API does not list or delete pipes; create_pipe returns an unguessable id.`,
         };
         break;
       case 'ping':
@@ -489,12 +443,19 @@ export async function handleRequest(request: any): Promise<void> {
           return;
         }
         if (!TOOL_NAMES.has(name)) {
-          sendError(request.id, -32601, `Method not found: ${name}`);
+          sendError(request.id, -32602, `Unknown tool: ${name}`);
           return;
         }
         const args = request.params?.arguments ?? {};
-        const data = await callTool(name, args);
-        result = toolCallResult(data);
+        try {
+          const data = await callTool(name, args);
+          result = toolCallResult(data);
+        } catch (error: any) {
+          result = {
+            content: [{ type: 'text', text: error?.message || String(error) }],
+            isError: true,
+          };
+        }
         break;
       }
       default:
