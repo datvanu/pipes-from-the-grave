@@ -5,6 +5,7 @@
 
 import type { ArrayInput, ArrayOutput } from './types.js';
 import type { RegexConfig } from '../types.js';
+import { compileSafeRegex, safeRegexReplace } from '../safe-regex.js';
 
 /**
  * Regex node runner implementation.
@@ -27,19 +28,14 @@ export class RegexRunner {
     if (!this.config.pattern) {
       throw new Error('regex node requires "pattern" configuration');
     }
+    compileSafeRegex(this.config.pattern, this.config.flags, { allowGlobal: true });
   }
 
   /**
    * Apply regex replacement to a value.
    */
   replace(value: string): string {
-    try {
-      const regex = new RegExp(this.config.pattern, this.config.flags);
-      return value.replace(regex, this.config.replacement);
-    } catch {
-      // If regex is invalid, return original value
-      return value;
-    }
+    return safeRegexReplace(this.config.pattern, this.config.flags, value, this.config.replacement ?? '');
   }
 
   /**

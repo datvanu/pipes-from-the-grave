@@ -7,7 +7,7 @@ import { XMLParser } from 'fast-xml-parser';
 import type { RunPipeOptions, PipeItem } from '../types.js';
 import type { ArrayInput, ArrayOutput } from './types.js';
 import { assertSafeUrl } from '../ssrf.js';
-import { fetchWithTimeout } from '../fetch-safe.js';
+import { safeFetch } from '../fetch-safe.js';
 
 /**
  * Configuration for fetch-rss node.
@@ -33,12 +33,18 @@ function textOf(value: unknown): string {
 /**
  * Parse RSS/Atom XML to PipeItems.
  */
+export const MAX_FEED_ITEMS = 500;
+
 export function parseRssFeed(xml: string): PipeItem[] {
+  if (typeof xml === 'string' && xml.length > 2 * 1024 * 1024) {
+    return [];
+  }
   const parser = new XMLParser({
     attributeNamePrefix: '',
     textNodeName: '_text',
     ignoreAttributes: false,
     allowBooleanAttributes: true,
+    processEntities: false,
   });
 
   let result;
@@ -54,7 +60,7 @@ export function parseRssFeed(xml: string): PipeItem[] {
       ? result.rss.channel.item
       : [result.rss.channel.item];
 
-    return items.map((item: any) => ({
+    return items.slice(0, MAX_FEED_ITEMS).map((item: any) => ({
       id: textOf(item.guid) || textOf(item.link) || textOf(item.title),
       title: textOf(item.title),
       link: textOf(item.link) || (typeof item.link === 'object' ? item.link?.href || '' : ''),
@@ -75,7 +81,7 @@ export function parseRssFeed(xml: string): PipeItem[] {
       ? result.feed.entry
       : [result.feed.entry];
 
-    return entries.map((entry: any) => {
+    return entries.slice(0, MAX_FEED_ITEMS).map((entry: any) => {
       const link = Array.isArray(entry.link)
         ? (entry.link.find((l: any) => l.rel === 'alternate') || entry.link[0])
         : entry.link;
@@ -145,10 +151,14 @@ export class FetchRssRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchWithTimeout(url, fetchFn as typeof fetch);
+    const response = await safeFetch(url, {
+      fetchFn: fetchFn as typeof fetch,
+      lookup: options?.lookupFn,
+      signal: options?.signal,
+    });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch feed: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch feed: ${response.status}`);
     }
 
     const xml = await response.text();

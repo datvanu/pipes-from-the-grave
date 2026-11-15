@@ -5,6 +5,7 @@
 
 import type { ArrayInput, ArrayOutput } from './types.js';
 import type { FilterConfig } from '../types.js';
+import { RegexDeniedError, safeRegexTest } from '../safe-regex.js';
 
 /**
  * Filter node runner implementation.
@@ -55,9 +56,9 @@ export class FilterRunner {
       
       case 'regex':
         try {
-          const regex = new RegExp(this.config.value, 'i');
-          return regex.test(strValue);
-        } catch {
+          return safeRegexTest(this.config.value, 'i', String(value));
+        } catch (err) {
+          if (err instanceof RegexDeniedError) return false;
           return false;
         }
 

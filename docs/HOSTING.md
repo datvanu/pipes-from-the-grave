@@ -17,7 +17,7 @@ The API can also serve the Vite build (and falls back to `index.html` for non-AP
 
 ## Recommendation (no cost for a jury demo)
 
-**One free Render web service** that builds the Vite app and starts the Fastify server with `./node_modules/.bin/tsx apps/server/src/index.ts` (`tsx` is a runtime dependency, so `npm ci --omit=dev` still starts). The same origin serves UI and API, so `VITE_API_BASE` can stay empty and CORS stays simple. `render.yaml` sets `healthCheckPath: /api/health` and `TRUST_PROXY=1`.
+**One free Render web service** that builds the Vite app and starts the Fastify server with `./node_modules/.bin/tsx apps/server/src/index.ts` (`tsx` is a runtime dependency, so `npm ci --omit=dev` still starts). The same origin serves UI and API, so `VITE_API_BASE` can stay empty and production CORS stays same-origin unless `CORS_ORIGINS` is set. `render.yaml` sets `healthCheckPath: /api/health` and `TRUST_PROXY=1`. Security headers include a CSP fitted to the Vite app, `Referrer-Policy: no-referrer`, a restrictive Permissions-Policy, and HSTS on the hosted origin.
 
 - **Cost:** $0 on Render’s Free compute plan (0.1 CPU, 512 MB RAM).
 - **Account needed:** a Render account (new). GitHub org `datvanu` can be connected later so Render builds from the public repo — that still needs a separate approval to make the repo public and to connect the account.
@@ -50,6 +50,7 @@ The engine is TypeScript and could be bundled into the Vite app, and `jsonplaceh
 docker build -t pipes-from-the-grave .
 docker run --rm -p 8787:8787 -e GHOST_MODE=demo -e TRUST_PROXY=1 pipes-from-the-grave
 # open http://localhost:8787/
+# The image runs as the non-root `node` user.
 ```
 
 ## Build the static UI (for a later Pages option)
@@ -76,7 +77,7 @@ See `.env.example`. For a single-service deploy the important values are:
 | `CORS_ORIGINS` | not required when the UI is served from the same origin; set it if the UI is on Pages |
 | `WEB_DIST_DIR` | unset (defaults to `apps/web/dist`) |
 | `VITE_API_BASE` | empty for same-origin |
-| `PUBLIC_BASE_URL` | optional; RSS channel links otherwise use the request host |
+| `PUBLIC_BASE_URL` | required for absolute export links in production; leave unset until the public HTTPS origin is known. Host and Forwarded headers are not trusted when hosted. |
 
 ## Accounts and approvals still required
 

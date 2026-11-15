@@ -197,4 +197,95 @@ describe('pipe API store and exports', () => {
     expect(got.statusCode).toBe(200);
     await app.close();
   });
+
+  it('does not persist an export id unless persist is true', async () => {
+    const runPipeFn = async () => ({ output: [{ id: '1', title: 'soul' }], itemsByNode: {} });
+    const app = await createApp({ logger: false, runPipeFn: runPipeFn as any });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/pipes/run',
+      payload: { pipe: samplePipe() },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.pipeId).toBeUndefined();
+    expect(body.exports).toBeUndefined();
+    await app.close();
+  });
+
+  it('rate-limits pipe creation', async () => {
+    httpLimits.createPerIp = 2;
+    httpLimits.createGlobal = 2;
+    const app = await createApp({ logger: false });
+    const codes: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await app.inject({ method: 'POST', url: '/api/pipes', payload: samplePipe(`Pipe ${i}`) });
+      codes.push(res.statusCode);
+    }
+    expect(codes.slice(0, 2).every((c) => c === 201)).toBe(true);
+    expect(codes[2]).toBe(429);
+    await app.close();
+  });
+
+  it('rejects unknown node types', async () => {
+    const app = await createApp({ logger: false });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/pipes',
+      payload: {
+        name: 'Nope',
+        nodes: [{ id: 'n1', type: 'eval', config: {} }],
+        edges: [],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/unknown or invalid node type/i);
+    await app.close();
+  });
+
+  it('advertises ghost config and security headers on health', async () => {
+    const previous = process.env.GHOST_MODE;
+    delete process.env.GHOST_MODE;
+    const app = await createApp({ logger: false });
+    const open = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(open.statusCode).toBe(200);
+    expect(open.json().ghost).toEqual({ mode: 'byok', acceptVisitorKeys: true });
+    expect(open.headers['content-security-policy']).toMatch(/default-src 'self'/);
+    expect(open.headers['referrer-policy']).toBe('no-referrer');
+    expect(open.headers['permissions-policy']).toMatch(/camera=\(\)/);
+    expect(open.headers['x-content-type-options']).toBe('nosniff');
+    expect(open.headers['x-frame-options']).toBe('DENY');
+    process.env.GHOST_MODE = 'demo';
+    const demo = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(demo.json().ghost).toEqual({ mode: 'demo', acceptVisitorKeys: false });
+    if (previous === undefined) delete process.env.GHOST_MODE;
+    else process.env.GHOST_MODE = previous;
+    await app.close();
+  });
+
+  it('uses relative export links in production when PUBLIC_BASE_URL is unset', async () => {
+    const previousEnv = process.env.NODE_ENV;
+    const previousBase = process.env.PUBLIC_BASE_URL;
+    process.env.NODE_ENV = 'production';
+    delete process.env.PUBLIC_BASE_URL;
+    const runPipeFn = async () => ({ output: [{ id: '1', title: 'soul' }], itemsByNode: {} });
+    const app = await createApp({ logger: false, runPipeFn: runPipeFn as any });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/pipes/run',
+      headers: { host: 'evil.example', 'x-forwarded-host': 'evil.example' },
+      payload: { pipe: samplePipe(), persist: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.exports.json).toBe(`/p/${body.pipeId}.json`);
+    expect(body.exports.rss).toBe(`/p/${body.pipeId}.rss`);
+    expect(JSON.stringify(body)).not.toContain('evil.example');
+    expect(res.headers['strict-transport-security']).toMatch(/max-age=/);
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousBase === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previousBase;
+    await app.close();
+  });
 });

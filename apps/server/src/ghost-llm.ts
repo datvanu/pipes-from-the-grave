@@ -100,7 +100,9 @@ export function readGhostLlmKey(headers: Record<string, unknown>): string | unde
   const raw = headers[GHOST_LLM_KEY_HEADER] ?? headers['X-Ghost-LLM-Key'];
   if (typeof raw !== 'string') return undefined;
   const key = raw.trim();
-  return key.length > 0 ? key : undefined;
+  if (!key) return undefined;
+  if (key.length > 512) return undefined;
+  return key;
 }
 
 function extractJsonObject(text: string): any {

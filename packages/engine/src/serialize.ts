@@ -100,15 +100,18 @@ export function itemsToJson(items: PipeItem[]): string {
  * Parse RSS XML string to PipeItems.
  */
 export function rss20ToItems(xml: string): PipeItem[] {
-  const parser = new XMLBuilder({
-    attributeNamePrefix: '',
-    textNodeName: '_text',
-    ignoreAttributes: false,
-  });
+  if (typeof xml === 'string' && xml.length > 2 * 1024 * 1024) {
+    return [];
+  }
 
   let result;
   try {
-    result = new XMLParser().parse(xml);
+    result = new XMLParser({
+      attributeNamePrefix: '',
+      textNodeName: '_text',
+      ignoreAttributes: false,
+      processEntities: false,
+    }).parse(xml);
   } catch {
     return [];
   }
@@ -121,7 +124,7 @@ export function rss20ToItems(xml: string): PipeItem[] {
     ? result.rss.channel.item
     : [result.rss.channel.item];
 
-  return items.map((item: any) => ({
+  return items.slice(0, 500).map((item: any) => ({
     id: item.guid?._text || item.link || '',
     title: item.title?._text || '',
     link: item.link || '',

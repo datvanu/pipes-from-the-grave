@@ -19,6 +19,16 @@ import { apiUrl } from './api'
 import { clearGhostByok, loadGhostByok, saveGhostByok } from './ghostKey'
 import { Modal } from './Modal'
 
+function isHttpHref(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim()) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 const PALETTE = [
   { type: 'fetch-rss', label: 'Fetch RSS', color: '#55ff99' },
   { type: 'fetch-json', label: 'Fetch JSON', color: '#77ccff' },
@@ -213,6 +223,7 @@ export default function App() {
   const [ghostProvider, setGhostProvider] = useState('openai')
   const [ghostModel, setGhostModel] = useState('')
   const [ghostFallback, setGhostFallback] = useState('')
+  const [acceptVisitorKeys, setAcceptVisitorKeys] = useState<boolean | null>(null)
   const [ghostByokReady, setGhostByokReady] = useState(false)
   const [draftReady, setDraftReady] = useState(false)
   const [draftTouched, setDraftTouched] = useState(false)
@@ -294,10 +305,20 @@ export default function App() {
     const timer = window.setTimeout(() => {
       if (!cancelled) setHostWait(true)
     }, 2500)
-    fetch(apiUrl('/api/health')).finally(() => {
-      window.clearTimeout(timer)
-      if (!cancelled) setHostWait(false)
-    })
+    fetch(apiUrl('/api/health'))
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data?.ghost && typeof data.ghost.acceptVisitorKeys === 'boolean') {
+          setAcceptVisitorKeys(data.ghost.acceptVisitorKeys)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAcceptVisitorKeys(true)
+      })
+      .finally(() => {
+        window.clearTimeout(timer)
+        if (!cancelled) setHostWait(false)
+      })
     return () => {
       cancelled = true
       window.clearTimeout(timer)
@@ -729,12 +750,14 @@ export default function App() {
           {outputs.map((item, idx) => (
             <div key={String(item.id || idx)} style={{ borderBottom: '1px solid #222', padding: '6px 0' }}>
               <strong>{String(item.title || item.id || 'item')}</strong>
-              {item.link ? (
+              {isHttpHref(item.link) ? (
                 <div>
-                  <a href={String(item.link)} target="_blank" rel="noreferrer" style={{ color: '#77ccff' }}>
-                    {String(item.link)}
+                  <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ color: '#77ccff' }}>
+                    {item.link}
                   </a>
                 </div>
+              ) : item.link ? (
+                <div style={{ color: '#9aa', wordBreak: 'break-all' }}>{String(item.link)}</div>
               ) : null}
               {item.summary ? <div style={{ opacity: 0.75 }}>{String(item.summary)}</div> : null}
             </div>
@@ -797,12 +820,14 @@ export default function App() {
           Type a short sentence. With no key, the Ghost uses free built-in rules (words such as “rss”, “sort”, “top 5”).
           It does not understand free-form language.
         </p>
+        {acceptVisitorKeys !== false && (
         <p style={{ opacity: 0.8 }}>
           Optional: paste your own API key for the provider below if you want a live model that can follow a fuller
           sentence. The key stays in this browser until you close the tab — or until you click Clear key. If you tick
           “Remember”, it is saved in this browser only. When you click Summon, the key is sent to that provider (the
           host shown in the list), not stored on our server.
         </p>
+        )}
         <label htmlFor="ghost-prompt" style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
           Your sentence
         </label>
@@ -816,8 +841,8 @@ export default function App() {
         />
         {unrecognizedDemo && (
           <p role="status" style={{ color: "#ffd7a8", fontSize: 13, marginTop: 8 }}>
-            I only follow simple keywords in demo mode (rss, json, filter, sort, top…). Try a chip below, or add your
-            own key for a live model.
+            I only follow simple keywords in demo mode (rss, json, filter, sort, top…). Try a chip below
+            {acceptVisitorKeys === true ? ', or add your own key for a live model.' : '.'}
           </p>
         )}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
@@ -832,6 +857,12 @@ export default function App() {
             </button>
           ))}
         </div>
+        {acceptVisitorKeys === false && (
+          <p style={{ fontSize: 12, opacity: 0.85, marginTop: 12 }}>
+            This host runs the free demo only. Visitor API keys are not accepted here.
+          </p>
+        )}
+        {acceptVisitorKeys === true && (
         <fieldset style={{ marginTop: 12, border: "1px solid #2a2a35", borderRadius: 8, padding: 10 }}>
           <legend style={{ fontFamily: "Cinzel, serif", color: "#9dffc2", padding: "0 6px" }}>Optional: your own API key</legend>
           <label style={{ display: "grid", gap: 4, fontSize: 12, marginBottom: 8 }}>
@@ -887,6 +918,7 @@ export default function App() {
             Clear saved key
           </button>
         </fieldset>
+        )}
         {ghostFallback && (
           <p style={{ color: "#ffb0b8", fontSize: 12, marginTop: 8 }}>Fell back to demo: {ghostFallback}</p>
         )}

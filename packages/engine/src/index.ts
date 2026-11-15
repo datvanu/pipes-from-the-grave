@@ -21,10 +21,10 @@ export type {
   OutputConfig,
 } from './types.js';
 
-export { PipeValidationError } from './types.js';
+export { PipeValidationError, NODE_TYPES } from './types.js';
 
 // SSRF protection
-export { isSafeUrl, assertSafeUrl, validateUrl } from './ssrf.js';
+export { isSafeUrl, assertSafeUrl, validateUrl, isBlockedAddress, resolveAndCheck, SSRF_DENIED } from './ssrf.js';
 
 // Topological sort
 export { topologicalSort, hasCycle, getExecutionOrder } from './topo.js';

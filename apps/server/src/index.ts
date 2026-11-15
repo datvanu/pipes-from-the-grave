@@ -10,7 +10,9 @@ import { fileURLToPath } from 'url';
 import { pipeRouter } from './router.js';
 import type { PipeDefinition } from '@pipes/engine';
 import type { runPipe as RunPipeFn } from '@pipes/engine';
-import { clientIp, gateGhost, isGhostDemoOnly, parseTrustProxy, httpLimits, sendRateLimited } from './pipe-limits.js';
+import { clientIp, gateGhost, isGhostDemoOnly, isHostedProduction, parseTrustProxy, httpLimits, sendRateLimited } from './pipe-limits.js';
+import { EphemeralPipeStore, type ExportCacheEntry } from './pipe-store.js';
+import { Stream } from 'node:stream';
 import {
   LOG_REDACT_PATHS,
   buildPipeWithUserKey,
@@ -26,14 +28,13 @@ const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8787;
 
-// In-memory pipe store
-const pipesStore: Map<string, PipeDefinition> = new Map();
+const pipesStore = new EphemeralPipeStore();
 
 // Optional file persistence
 const PERSISTENCE_FILE = path.join(__dirname, '..', 'data', 'pipes.json');
 
-// Cache for exported pipes, keyed by `${id}:json` or `${id}:rss`.
-const exportCache = new Map<string, { body: unknown; expires: number }>();
+// Cache for exported pipes, keyed by `${id}:${format}:${origin}`.
+const exportCache = new Map<string, ExportCacheEntry>();
 
 /** Test helper: drop in-memory pipes and export cache. */
 export function resetMemoryState() {
@@ -44,14 +45,14 @@ export function resetMemoryState() {
 /**
  * Load pipes from file (if exists)
  */
-async function loadPipesFromFile(): Promise<Map<string, PipeDefinition>> {
+async function loadPipesFromFile(): Promise<PipeDefinition[]> {
   try {
     const fs = await import('fs/promises');
     const data = await fs.readFile(PERSISTENCE_FILE, 'utf8');
     const stored = JSON.parse(data) as PipeDefinition[];
-    return new Map(stored.map(p => [p.id, p]));
+    return Array.isArray(stored) ? stored : [];
   } catch {
-    return new Map();
+    return [];
   }
 }
 
@@ -69,10 +70,25 @@ async function savePipesToFile(): Promise<void> {
       fsDir.mkdirSync(dataDir, { recursive: true });
     }
     
-    const pipes = Array.from(pipesStore.values());
+    const pipes = pipesStore.values();
     await fs.writeFile(PERSISTENCE_FILE, JSON.stringify(pipes, null, 2));
   } catch (error) {
     console.error('Failed to save pipes to file:', error);
+  }
+}
+
+
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+
+function applySecurityHeaders(set: (name: string, value: string) => void) {
+  set('X-Content-Type-Options', 'nosniff');
+  set('X-Frame-Options', 'DENY');
+  set('Referrer-Policy', 'no-referrer');
+  set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  if (isHostedProduction() || process.env.PUBLIC_BASE_URL?.startsWith('https:')) {
+    set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
 }
 
@@ -94,12 +110,18 @@ export async function createApp(options: CreateAppOptions = {}) {
     bodyLimit: httpLimits.maxBodyBytes,
   });
 
-  // CORS — localhost defaults for dev; set CORS_ORIGINS for a hosted frontend.
-  const corsOrigins = (process.env.CORS_ORIGINS ||
-    'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // CORS: explicit allowlist, or same-origin only when hosted, localhost in dev.
+  const corsEnv = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const corsOrigins = corsEnv.length
+    ? corsEnv
+    : isHostedProduction()
+      ? false
+      : [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:5173',
+        ];
   await app.register(cors, {
     origin: corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
@@ -119,24 +141,32 @@ export async function createApp(options: CreateAppOptions = {}) {
       prefix: '/',
       maxAge: '1d',
       cacheControl: true,
-      setHeaders: (res, path) => {
-        if (path.endsWith('.html')) {
-          res.setHeader('Cache-Control', 'no-cache');
-        }
+      setHeaders: (res, filePath) => {
+        const raw = (res as { raw?: { setHeader: (name: string, value: string) => void }; setHeader?: (name: string, value: string) => void });
+        const set = (name: string, value: string) => {
+          if (typeof raw.setHeader === 'function') raw.setHeader(name, value);
+          else raw.raw?.setHeader(name, value);
+        };
+        applySecurityHeaders(set);
+        if (filePath.endsWith('.html')) set('Cache-Control', 'no-cache');
       },
     });
   }
 
-  // Health check
-  app.get('/api/health', async (request, reply) => {
-    return { status: 'healthy', timestamp: new Date().toISOString() };
+  // Health check also advertises whether visitor keys are accepted.
+  app.get('/api/health', async () => {
+    const demo = isGhostDemoOnly();
+    return {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      ghost: { mode: demo ? 'demo' : 'byok', acceptVisitorKeys: !demo },
+    };
   });
 
-  // Pre-handler to set rate limit headers when available
-  app.addHook('preHandler', (request, reply, done) => {
-    // Add common headers that might be useful
-    reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('X-Frame-Options', 'DENY');
+  app.addHook('onRequest', (_request, reply, done) => {
+    applySecurityHeaders((name, value) => {
+      reply.header(name, value);
+    });
     done();
   });
 
@@ -149,15 +179,34 @@ export async function createApp(options: CreateAppOptions = {}) {
     port: PORT,
   });
 
-  // Never echo a user-supplied LLM key in a response body.
-  app.addHook('onSend', (request, _reply, payload, done) => {
-    const key = readGhostLlmKey(request.headers as Record<string, unknown>);
-    const secrets = key ? [key] : [];
-    if (payloadContainsSecret(payload, secrets) && (typeof payload === 'string' || Buffer.isBuffer(payload))) {
-      done(null, redactSecrets(payload.toString(), secrets));
+  // Serialize first, then redact, so JSON objects cannot leak a key.
+  app.addHook('onSend', (request, reply, payload, done) => {
+    if (payload == null || payload instanceof Stream) {
+      done(null, payload);
       return;
     }
-    done(null, payload);
+    const key = readGhostLlmKey(request.headers as Record<string, unknown>);
+    const secrets = key ? [key] : [];
+    let text: string;
+    let asJson = false;
+    if (typeof payload === 'string') {
+      text = payload;
+    } else if (Buffer.isBuffer(payload)) {
+      text = payload.toString();
+    } else {
+      try {
+        text = JSON.stringify(payload);
+        asJson = true;
+      } catch {
+        done(null, payload);
+        return;
+      }
+    }
+    const redacted = redactSecrets(text, secrets);
+    if (asJson) {
+      reply.header('Content-Type', 'application/json; charset=utf-8');
+    }
+    done(null, redacted);
   });
 
   app.get('/api/ghost/providers', async () => {
@@ -173,6 +222,10 @@ export async function createApp(options: CreateAppOptions = {}) {
 
       if (!body.prompt || typeof body.prompt !== 'string') {
         reply.code(400).send({ error: 'Missing or invalid prompt' });
+        return;
+      }
+      if (body.prompt.length > httpLimits.maxPromptChars) {
+        reply.code(400).send({ error: 'Prompt is too long' });
         return;
       }
 
@@ -259,8 +312,8 @@ export async function createApp(options: CreateAppOptions = {}) {
 export async function startServer() {
   try {
     const loadedPipes = await loadPipesFromFile();
-    for (const [id, pipe] of loadedPipes) {
-      pipesStore.set(id, pipe);
+    for (const pipe of loadedPipes) {
+      if (pipe?.id) pipesStore.set(pipe.id, pipe);
     }
 
     const app = await createApp();

@@ -2,7 +2,7 @@
  * Public-API limits and helpers for pipe create/run/export.
  */
 import type { PipeDefinition } from '@pipes/engine';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import { NODE_TYPES } from '@pipes/engine';
 import { checkRateLimit } from './rate-limit.js';
 
 export const UUID_RE =
@@ -27,32 +27,54 @@ export const httpLimits = {
   maxEdges: 40,
   maxBodyBytes: 256 * 1024,
   runTimeoutMs: 25_000,
+  createPerIp: 30,
+  createGlobal: 120,
+  storeMaxEntries: 200,
+  storeMaxBytes: 10 * 1024 * 1024,
+  storeTtlMs: 45 * 60 * 1000,
+  maxPromptChars: 8 * 1024,
+  maxKeyChars: 512,
 };
 
-export function clientIp(request: FastifyRequest): string {
+export function clientIp(request: { ip?: string }): string {
   return (request.ip || 'unknown').split(',')[0]!.trim() || 'unknown';
 }
 
-export function publicBaseUrl(request: FastifyRequest, fallbackPort: number): string {
+export function isHostedProduction(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.RENDER) || env.NODE_ENV === 'production';
+}
+
+/**
+ * Canonical public origin for export links. In production only PUBLIC_BASE_URL
+ * is used — Host and Forwarded headers are not trusted.
+ */
+export function publicBaseUrl(request: { protocol?: string; headers: Record<string, unknown> }, fallbackPort: number): string {
   const fromEnv = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
   if (fromEnv) return fromEnv;
-  const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0]!.trim();
-  const proto = forwardedProto || request.protocol || 'http';
-  const forwardedHost = String(request.headers['x-forwarded-host'] || '').split(',')[0]!.trim();
-  const host = forwardedHost || String(request.headers.host || `localhost:${fallbackPort}`);
+  if (isHostedProduction()) return '';
+  const proto = request.protocol || 'http';
+  const host = String(request.headers.host || `localhost:${fallbackPort}`);
   return `${proto}://${host}`;
+}
+
+export function exportHref(base: string, path: string): string {
+  if (!base) return path.startsWith('/') ? path : `/${path}`;
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 export function isGhostDemoOnly(): boolean {
   return (process.env.GHOST_MODE || '').trim().toLowerCase() === 'demo';
 }
 
-export function parseTrustProxy(env: NodeJS.ProcessEnv = process.env): boolean | number {
+export function parseTrustProxy(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | ((address: string, hop: number) => boolean) {
   const raw = (env.TRUST_PROXY || '').trim();
   if (raw === '0' || raw.toLowerCase() === 'false') return false;
-  if (raw === '1' || raw.toLowerCase() === 'true') return 1;
-  if (/^\d+$/.test(raw)) return Number(raw);
-  if (env.RENDER) return 1;
+  const hopsFrom = (hops: number) => (_address: string, hop: number) => hop < hops;
+  if (raw === '1' || raw.toLowerCase() === 'true') return hopsFrom(1);
+  if (/^\d+$/.test(raw)) return hopsFrom(Number(raw));
+  if (env.RENDER) return hopsFrom(1);
   return false;
 }
 
@@ -69,6 +91,12 @@ export function validatePipeShape(pipe: PipeDefinition | undefined): string | nu
   if (pipe.edges.length > httpLimits.maxEdges) {
     return `Pipe exceeds the limit of ${httpLimits.maxEdges} edges`;
   }
+  const allowed = new Set(NODE_TYPES);
+  for (const node of pipe.nodes) {
+    if (!node || typeof node.id !== 'string' || !allowed.has(node.type as (typeof NODE_TYPES)[number])) {
+      return 'Pipe contains an unknown or invalid node type';
+    }
+  }
   return null;
 }
 
@@ -82,22 +110,26 @@ export function hasItemsOverride(pipe: PipeDefinition): boolean {
 }
 
 export async function runPipeBounded<T>(
-  run: () => Promise<T>,
+  run: (signal: AbortSignal) => Promise<T>,
   timeoutMs = httpLimits.runTimeoutMs,
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutError = new Error(`Pipe run timed out after ${timeoutMs}ms`);
   try {
     return await Promise.race([
-      run(),
+      run(controller.signal),
       new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Pipe run timed out after ${timeoutMs}ms`)),
-          timeoutMs,
-        );
+        if (controller.signal.aborted) {
+          reject(timeoutError);
+          return;
+        }
+        controller.signal.addEventListener('abort', () => reject(timeoutError), { once: true });
       }),
     ]);
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
+    if (!controller.signal.aborted) controller.abort();
   }
 }
 
@@ -125,6 +157,24 @@ export function gateExpensiveRun(ip: string): RunGate {
   };
 }
 
+export function gateCreate(ip: string): RunGate {
+  const perIp = checkRateLimit(`create:${ip}`, {
+    windowMs: httpLimits.windowMs,
+    max: httpLimits.createPerIp,
+  });
+  if (!perIp.allowed) return perIp;
+  const global = checkRateLimit('create:global', {
+    windowMs: httpLimits.windowMs,
+    max: httpLimits.createGlobal,
+  });
+  if (!global.allowed) return global;
+  return {
+    allowed: true,
+    remaining: Math.min(perIp.remaining, global.remaining),
+    resetMs: Math.max(perIp.resetMs, global.resetMs),
+  };
+}
+
 export function gateGhost(ip: string): RunGate {
   const perIp = checkRateLimit(`ghost:${ip}`, {
     windowMs: httpLimits.windowMs,
@@ -143,7 +193,11 @@ export function gateGhost(ip: string): RunGate {
   };
 }
 
-export function sendRateLimited(reply: FastifyReply, gate: RunGate, message: string) {
+export function sendRateLimited(
+  reply: { code: (status: number) => { header: (name: string, value: string) => unknown }; header: (name: string, value: string) => unknown; send: (payload: unknown) => unknown },
+  gate: RunGate,
+  message: string,
+) {
   reply.code(429).header('Retry-After', String(Math.ceil(gate.resetMs / 1000)));
   reply.header('X-RateLimit-Remaining', '0');
   reply.send({

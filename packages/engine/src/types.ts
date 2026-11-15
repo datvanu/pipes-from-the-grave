@@ -32,6 +32,19 @@ export type NodeType =
   | 'output-rss'
   | 'output-json';
 
+export const NODE_TYPES: NodeType[] = [
+  'fetch-rss',
+  'fetch-json',
+  'filter',
+  'sort',
+  'merge',
+  'truncate',
+  'regex',
+  'rename',
+  'output-rss',
+  'output-json',
+];
+
 /**
  * A node in the pipe definition graph.
  */
@@ -68,6 +81,8 @@ export interface PipeDefinition {
  */
 export interface RunPipeOptions {
   fetchFn?: typeof fetch;
+  lookupFn?: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+  signal?: AbortSignal;
   seedInputs?: Record<string, PipeItem[]>;
 }
 

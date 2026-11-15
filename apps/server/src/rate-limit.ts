@@ -21,10 +21,8 @@ class RateLimitMap {
     const { windowMs, max } = { ...this.defaultOptions, ...options };
     const now = Date.now();
 
-    if (this.records.size > 256) {
-      for (const [key, rec] of this.records) {
-        if (now >= rec.resetTime) this.records.delete(key);
-      }
+    for (const [key, rec] of this.records) {
+      if (now >= rec.resetTime) this.records.delete(key);
     }
 
     const record = this.records.get(ip);

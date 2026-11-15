@@ -12,10 +12,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^5.12.1",
+    "ipaddr.js": "^2.2.0",
+    "re2-wasm": "^1.0.2",
+    "undici": "^6.21.0"
   },
   "devDependencies": {
-    "vitest": "^2.1.8",
+    "vitest": "^5.1.0",
     "fast-check": "^3.23.0",
     "typescript": "^5.7.2",
     "@types/node": "^22.10.0"

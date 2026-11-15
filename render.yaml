@@ -15,3 +15,9 @@ services:
         value: demo
       - key: TRUST_PROXY
         value: "1"
+      # After the Render account exists, set this to the public HTTPS origin
+      # (for example https://YOUR-SERVICE.onrender.com) so export links are
+      # absolute. Until then the host serves relative /p/:id links and does
+      # not trust the Host or Forwarded headers.
+      # - key: PUBLIC_BASE_URL
+      #   value: https://YOUR-SERVICE.onrender.com

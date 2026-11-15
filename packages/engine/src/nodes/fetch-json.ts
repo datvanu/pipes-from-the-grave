@@ -6,7 +6,8 @@
 import type { RunPipeOptions, PipeItem } from '../types.js';
 import type { ArrayInput, ArrayOutput } from './types.js';
 import { assertSafeUrl } from '../ssrf.js';
-import { fetchWithTimeout } from '../fetch-safe.js';
+import { safeFetch } from '../fetch-safe.js';
+import { MAX_FEED_ITEMS } from './fetch-rss.js';
 
 /**
  * Configuration for fetch-json node.
@@ -62,7 +63,7 @@ export function parseJsonToItems(json: unknown, mapping?: Record<string, string>
 
   const fieldMap = { ...DEFAULT_MAPPING, ...(mapping || {}) };
 
-  return items.map((item: any) => {
+  return items.slice(0, MAX_FEED_ITEMS).map((item: any) => {
     const result: Record<string, unknown> = {};
 
     // Map known fields
@@ -136,10 +137,14 @@ export class FetchJsonRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchWithTimeout(url, fetchFn as typeof fetch);
+    const response = await safeFetch(url, {
+      fetchFn: fetchFn as typeof fetch,
+      lookup: options?.lookupFn,
+      signal: options?.signal,
+    });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch JSON: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch JSON: ${response.status}`);
     }
 
     const json = await response.json();

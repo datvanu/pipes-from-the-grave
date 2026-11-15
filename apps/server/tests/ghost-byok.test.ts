@@ -206,4 +206,55 @@ describe('Ghost BYOK', () => {
     await app.close();
   });
 
+  it('redacts a key that appears inside a JSON object payload', async () => {
+    const leaky = {
+      ...llmPipe,
+      explanation: [`used key ${SECRET}`],
+    };
+    const llmFetch: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(leaky) } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    const app = await createApp({ logger: false, llmFetch });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ghost',
+      headers: { 'x-ghost-llm-key': SECRET },
+      payload: { prompt: 'fetch rss about rust, sort, top 5', provider: 'openai' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain(SECRET);
+    expect(JSON.stringify(res.json())).not.toContain(SECRET);
+    expect(res.json().mode).toBe('llm');
+    await app.close();
+  });
+
+  it('rejects an oversized prompt and ignores an oversized key', async () => {
+    const { httpLimits } = await import('../src/pipe-limits.js');
+    let called = 0;
+    const llmFetch: typeof fetch = async () => {
+      called += 1;
+      return new Response('{}', { status: 200 });
+    };
+    const app = await createApp({ logger: false, llmFetch });
+    const tooLong = await app.inject({
+      method: 'POST',
+      url: '/api/ghost',
+      payload: { prompt: 'x'.repeat(httpLimits.maxPromptChars + 1) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error).toMatch(/too long/i);
+    const oversizedKey = await app.inject({
+      method: 'POST',
+      url: '/api/ghost',
+      headers: { 'x-ghost-llm-key': 'k'.repeat(httpLimits.maxKeyChars + 1) },
+      payload: { prompt: 'fetch rss, top 5' },
+    });
+    expect(oversizedKey.statusCode).toBe(200);
+    expect(oversizedKey.json().mode).toBe('demo');
+    expect(called).toBe(0);
+    await app.close();
+  });
+
 });

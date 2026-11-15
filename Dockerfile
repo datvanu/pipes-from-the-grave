@@ -15,7 +15,8 @@ COPY package.json package-lock.json tsconfig.json ./
 COPY apps ./apps
 COPY packages ./packages
 COPY --from=build /app/apps/web/dist ./apps/web/dist
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && chown -R node:node /app
+USER node
 ENV PORT=8787
 ENV GHOST_MODE=demo
 ENV TRUST_PROXY=1

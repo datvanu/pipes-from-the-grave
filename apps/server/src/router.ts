@@ -6,6 +6,8 @@ import type { PipeDefinition } from '@pipes/engine';
 import { runPipe as engineRunPipe, itemsToRss20 } from '@pipes/engine';
 import {
   clientIp,
+  exportHref,
+  gateCreate,
   gateExpensiveRun,
   hasItemsOverride,
   httpLimits,
@@ -16,18 +18,19 @@ import {
   sendRateLimited,
   validatePipeShape,
 } from './pipe-limits.js';
+import { EphemeralPipeStore, StoreLimitError, pruneExportCache, type ExportCacheEntry } from './pipe-store.js';
 
 export interface ServerPluginOptions extends FastifyPluginOptions {
-  pipesStore: Map<string, PipeDefinition>;
+  pipesStore: EphemeralPipeStore;
   savePipesToFile: () => Promise<void>;
-  exportCache: Map<string, { body: unknown; expires: number }>;
+  exportCache: Map<string, ExportCacheEntry>;
   runPipeFn?: typeof engineRunPipe;
   port?: number;
 }
 
 function preparePipe(
   body: PipeDefinition,
-  pipesStore: Map<string, PipeDefinition>,
+  pipesStore: EphemeralPipeStore,
 ): { error?: string; pipe?: PipeDefinition } {
   const shapeError = validatePipeShape(body);
   if (shapeError) return { error: shapeError };
@@ -68,13 +71,25 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
 
   // Create a new pipe (server-assigned UUID) or update an existing unguessable id.
   app.post('/api/pipes', async (request, reply) => {
+    const gate = gateCreate(clientIp(request));
+    reply.header('X-RateLimit-Remaining', String(gate.remaining));
+    if (!gate.allowed) {
+      sendRateLimited(reply, gate, 'Too many pipes created. Please try again later.');
+      return;
+    }
     const prepared = preparePipe((request.body || {}) as PipeDefinition, pipesStore);
     if (prepared.error || !prepared.pipe) {
       reply.code(400).send({ error: prepared.error });
       return;
     }
     const created = !pipesStore.has(prepared.pipe.id);
-    pipesStore.set(prepared.pipe.id, prepared.pipe);
+    try {
+      pipesStore.set(prepared.pipe.id, prepared.pipe);
+    } catch (error) {
+      const status = error instanceof StoreLimitError ? 503 : 400;
+      reply.code(status).send({ error: error instanceof Error ? error.message : 'Store limit reached' });
+      return;
+    }
     void savePipesToFile();
     reply.code(created ? 201 : 200).send(prepared.pipe);
   });
@@ -105,13 +120,19 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
         return;
       }
       stored = prepared.pipe;
-      pipesStore.set(stored.id, stored);
+      try {
+        pipesStore.set(stored.id, stored);
+      } catch (error) {
+        const status = error instanceof StoreLimitError ? 503 : 400;
+        reply.code(status).send({ error: error instanceof Error ? error.message : 'Store limit reached' });
+        return;
+      }
       void savePipesToFile();
     }
 
     try {
       const startTime = Date.now();
-      const result = await runPipeBounded(() => runFn(stored));
+      const result = await runPipeBounded((signal) => runFn(stored, { signal }));
       const durationMs = Date.now() - startTime;
       const base = publicBaseUrl(request, port);
       reply.code(200).send({
@@ -126,8 +147,8 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
           ? {
               pipeId: stored.id,
               exports: {
-                json: `${base}/p/${stored.id}.json`,
-                rss: `${base}/p/${stored.id}.rss`,
+                json: exportHref(base, `/p/${stored.id}.json`),
+                rss: exportHref(base, `/p/${stored.id}.rss`),
               },
             }
           : {}),
@@ -150,7 +171,7 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
       reply.code(400).send({ error: 'Pipe definition is required' });
       return;
     }
-    await executeRun(pipe, request, reply, body.persist !== false);
+    await executeRun(pipe, request, reply, body.persist === true);
   });
 
   app.post('/api/pipes/:id/run', async (request, reply) => {
@@ -181,7 +202,9 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
       return;
     }
 
-    const cacheKey = `${id}:${format}`;
+    pruneExportCache(exportCache);
+    const base = publicBaseUrl(request, port);
+    const cacheKey = `${id}:${format}:${base || 'relative'}`;
     const cached = exportCache.get(cacheKey);
     if (cached && cached.expires > Date.now()) {
       reply
@@ -198,17 +221,17 @@ export async function pipeRouter(app: FastifyInstance, options: ServerPluginOpti
     }
 
     try {
-      const result = await runPipeBounded(() => runFn(pipe));
+      const result = await runPipeBounded((signal) => runFn(pipe, { signal }));
       let body: unknown = result.output;
       if (format === 'rss') {
         body = itemsToRss20(result.output, {
           title: `${pipe.name} - Pipes from the Grave`,
-          link: `${publicBaseUrl(request, port)}/p/${pipe.id}.rss`,
+          link: exportHref(base, `/p/${pipe.id}.rss`),
           description: `RSS feed generated from pipe: ${pipe.name}`,
           generator: 'pipes-from-the-grave',
         });
       }
-      exportCache.set(cacheKey, { body, expires: Date.now() + 60_000 });
+      exportCache.set(cacheKey, { body, expires: Date.now() + 60_000, origin: base || 'relative' });
       reply
         .code(200)
         .header('Content-Type', format === 'rss' ? 'application/rss+xml' : 'application/json')
