@@ -12,7 +12,7 @@ import { fetchWithTimeout } from '../fetch-safe.js';
  * Configuration for fetch-json node.
  */
 export interface FetchJsonConfig {
-  url: string;
+  url?: string;
   itemsOverride?: PipeItem[]; // For testing
   mapping?: Record<string, string>; // Map JSON fields to PipeItem fields
 }
@@ -124,6 +124,11 @@ export class FetchJsonRunner {
       return this.config.itemsOverride;
     }
 
+    const url = this.config.url;
+    if (!url) {
+      throw new Error('fetch-json node requires "url" or "itemsOverride"');
+    }
+
     // Fetch the JSON
     const fetchFn = options?.fetchFn ?? globalThis.fetch;
     
@@ -131,7 +136,7 @@ export class FetchJsonRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchWithTimeout(this.config.url, fetchFn as typeof fetch);
+    const response = await fetchWithTimeout(url, fetchFn as typeof fetch);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch JSON: ${response.status} ${response.statusText}`);

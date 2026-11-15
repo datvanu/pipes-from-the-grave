@@ -4,7 +4,7 @@
  */
 
 import type { ArrayInput, ArrayOutput } from './types.js';
-import type { RenameConfig } from '../types.js';
+import type { PipeItem, RenameConfig } from '../types.js';
 
 /**
  * Rename node runner implementation.
@@ -29,23 +29,21 @@ export class RenameRunner {
    * Run the rename node.
    */
   run(input: ArrayInput): ArrayOutput {
-    const items = input.items.map(item => {
-      const newItem: Record<string, unknown> = {};
-      
+    const items: PipeItem[] = input.items.map((item) => {
+      const newItem: PipeItem = { ...item };
+
       // Copy fields, renaming as configured
       for (const [oldKey, newKey] of Object.entries(this.config.mapping)) {
         if (oldKey in item) {
-          newItem[newKey] = item[oldKey];
+          (newItem as Record<string, unknown>)[newKey] = item[oldKey];
+          if (oldKey !== newKey) {
+            delete (newItem as Record<string, unknown>)[oldKey];
+          }
         }
       }
-      
-      // Copy fields not in mapping
-      for (const key of Object.keys(item)) {
-        if (!(key in this.config.mapping)) {
-          newItem[key] = item[key];
-        }
-      }
-      
+
+      if (typeof newItem.id !== 'string') newItem.id = String(newItem.id ?? '');
+      if (typeof newItem.title !== 'string') newItem.title = String(newItem.title ?? '');
       return newItem;
     });
 

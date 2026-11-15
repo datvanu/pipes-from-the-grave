@@ -47,14 +47,14 @@ export const TEMPLATES: { id: string; name: string; blurb: string; pipe: PipeDef
     },
   },
   {
-    id: 'hn-frontpage',
-    name: 'Hacker News Digest',
-    blurb: 'Fetch the HN Atom feed, sort by published, keep top 15.',
+    id: 'frontpage-digest',
+    name: 'Frontpage Digest',
+    blurb: 'Fetch a public Atom feed, sort by published, keep the top 15.',
     pipe: {
-      id: 'template-hn-frontpage',
-      name: 'Hacker News Digest',
+      id: 'template-frontpage-digest',
+      name: 'Frontpage Digest',
       nodes: [
-        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://hnrss.org/frontpage' }, position: { x: 80, y: 120 } },
+        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.rfc-editor.org/rfcrss.xml' }, position: { x: 80, y: 120 } },
         { id: 'sort-1', type: 'sort', config: { field: 'published', order: 'desc' }, position: { x: 340, y: 120 } },
         { id: 'truncate-1', type: 'truncate', config: { limit: 15 }, position: { x: 600, y: 120 } },
         { id: 'output-rss-1', type: 'output-rss', config: {}, position: { x: 860, y: 120 } },

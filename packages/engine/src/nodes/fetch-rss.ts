@@ -13,7 +13,7 @@ import { fetchWithTimeout } from '../fetch-safe.js';
  * Configuration for fetch-rss node.
  */
 export interface FetchRssConfig {
-  url: string;
+  url?: string;
   itemsOverride?: PipeItem[]; // For testing
 }
 
@@ -133,6 +133,11 @@ export class FetchRssRunner {
       return this.config.itemsOverride;
     }
 
+    const url = this.config.url;
+    if (!url) {
+      throw new Error('fetch-rss node requires "url" or "itemsOverride"');
+    }
+
     // Fetch the feed
     const fetchFn = options?.fetchFn ?? globalThis.fetch;
     
@@ -140,7 +145,7 @@ export class FetchRssRunner {
       throw new Error('fetchFn not available');
     }
 
-    const response = await fetchWithTimeout(this.config.url, fetchFn as typeof fetch);
+    const response = await fetchWithTimeout(url, fetchFn as typeof fetch);
 
     if (!response.ok) {
       throw new Error(`Failed to fetch feed: ${response.status} ${response.statusText}`);

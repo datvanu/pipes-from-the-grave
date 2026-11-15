@@ -10,6 +10,8 @@ coverage/
 *.log
 .DS_Store
 logs/
+# The /.kiro directory must stay tracked (hackathon rule).
+# Ignore only local overrides, not steering, specs, hooks, or agents.
 .kiro/permissions.yaml
 .kiro/settings/mcp.local.json
 *.pem
@@ -17,3 +19,11 @@ logs/
 .credentials/
 apps/server/data/
 *.tsbuildinfo
+
+# Accidental tsc emit beside TypeScript sources
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.map
+apps/*/src/**/*.js
+apps/*/src/**/*.d.ts
+apps/*/src/**/*.map

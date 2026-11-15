@@ -15,6 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { TEMPLATES, type PipeDefinition } from './templates'
+import { apiUrl } from './api'
 
 const PALETTE = [
   { type: 'fetch-rss', label: 'Fetch RSS', color: '#55ff99' },
@@ -269,7 +270,7 @@ export default function App() {
     setRunMeta({})
     try {
       const pipe = fromFlow(pipeName, nodes, edges)
-      const saveRes = await fetch('/api/pipes', {
+      const saveRes = await fetch(apiUrl('/api/pipes'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pipe),
@@ -280,7 +281,7 @@ export default function App() {
       }
       const saved = await saveRes.json()
       setSavedPipeId(saved.id)
-      const runRes = await fetch(`/api/pipes/${saved.id}/run`, { method: 'POST' })
+      const runRes = await fetch(apiUrl(`/api/pipes/${saved.id}/run`), { method: 'POST' })
       if (!runRes.ok) {
         const err = await readApiError(runRes)
         setRunMeta({ error: err.message, status: err.status, resetMs: err.retryAfterMs })
@@ -299,7 +300,7 @@ export default function App() {
         resetMs: result.rateLimit?.resetMs,
       })
       const n = (result.output || []).length
-      setStatus(`Returned ${n} souls in ${result.durationMs ?? '?'} ms. Graveyard exports: /p/${saved.id}.json`)
+      setStatus(`Returned ${n} souls in ${result.durationMs ?? '?'} ms. Graveyard exports: ${apiUrl(`/p/${saved.id}.json`)}`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setStatus(`The séance failed: ${msg}`)
@@ -313,7 +314,7 @@ export default function App() {
     setBusy(true)
     setGhostLines(['The Ghost listens...'])
     try {
-      const res = await fetch('/api/ghost', {
+      const res = await fetch(apiUrl('/api/ghost'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: ghostPrompt }),
@@ -332,7 +333,7 @@ export default function App() {
       const lines = Array.isArray(data.explanation) ? data.explanation : [String(data.explanation || '')]
       setGhostLines(lines)
       setLastGhostLines(lines)
-      setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes. Review the canvas, then Run.`)
+      setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes${data.mode ? ` (${data.mode} mode)` : ''}. Review the canvas, then Run.`)
     } catch (err) {
       setGhostLines([`Something flickers... ${err instanceof Error ? err.message : String(err)}`])
     } finally {

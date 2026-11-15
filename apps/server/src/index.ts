@@ -69,20 +69,22 @@ export async function startServer() {
     logger: true,
   });
 
-  // CORS - allow localhost for dev
+  // CORS — localhost defaults for dev; set CORS_ORIGINS for a hosted frontend.
+  const corsOrigins = (process.env.CORS_ORIGINS ||
+    'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   await app.register(cors, {
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173',
-    ],
+    origin: corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Static files from web dist (if exists)
-  const webDistPath = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');
+  // Static files from the Vite build (apps/web/dist), overridable for containers.
+  const webDistPath = process.env.WEB_DIST_DIR
+    ? path.resolve(process.env.WEB_DIST_DIR)
+    : path.join(__dirname, '..', '..', 'web', 'dist');
   const webDistExists = await import('fs/promises')
     .then(fs => fs.stat(webDistPath).then(() => true).catch(() => false));
 
@@ -140,10 +142,18 @@ export async function startServer() {
         return;
       }
 
+      // Demo mode is the default and requires no API keys.
+      // An LLM hook is not wired until Kilian decides otherwise.
+      const requestedMode = (process.env.GHOST_MODE || 'demo').toLowerCase();
+      const mode = requestedMode === 'llm' && process.env.GHOST_LLM_URL ? 'llm' : 'demo';
+      if (requestedMode === 'llm' && mode === 'demo') {
+        request.log.warn('GHOST_MODE=llm but GHOST_LLM_URL is unset; using rule-based demo');
+      }
+
       const { buildPipeFromPrompt } = await import('./ghost.js');
       const result = buildPipeFromPrompt(body.prompt);
 
-      reply.code(200).send(result);
+      reply.code(200).send({ ...result, mode });
     } catch (error: any) {
       console.error('Ghost builder error:', error);
       reply.code(500).send({ 
@@ -155,7 +165,7 @@ export async function startServer() {
 
   // Export endpoints (public pipes)
   app.get('/p/:id.json', async (request, reply) => {
-    const id = request.params.id as string;
+    const { id } = request.params as { id: string };
     
     if (!pipesStore.has(id)) {
       reply.code(404).send({ error: 'Pipe not found' });
@@ -193,7 +203,7 @@ export async function startServer() {
   });
 
   app.get('/p/:id.rss', async (request, reply) => {
-    const id = request.params.id as string;
+    const { id } = request.params as { id: string };
     
     if (!pipesStore.has(id)) {
       reply.code(404).send({ error: 'Pipe not found' });
@@ -248,10 +258,26 @@ export async function startServer() {
       pipesStore.set(id, pipe);
     }
 
+    // SPA fallback for the hosted Vite build (non-API routes).
+    app.setNotFoundHandler(async (request, reply) => {
+      const url = request.raw.url || '';
+      if (url.startsWith('/api') || url.startsWith('/p/')) {
+        reply.code(404).send({ error: 'Not found' });
+        return;
+      }
+      if (webDistExists) {
+        return reply.sendFile('index.html');
+      }
+      reply.code(404).send({ error: 'Not found' });
+    });
+
     await app.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`Server listening on port ${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/api/health`);
-    
+    if (webDistExists) {
+      console.log(`Web UI: http://localhost:${PORT}/`);
+    }
+
     return app;
   } catch (error) {
     console.error('Failed to start server:', error);
