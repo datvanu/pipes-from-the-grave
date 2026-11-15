@@ -6,23 +6,35 @@
 import type { PipeDefinition, PipeNode, PipeEdge, NodeType } from '@pipes/engine';
 
 // Safe default RSS URL for demo purposes
-const SAFE_RSS_URL = 'https://www.reddit.com/r/programming/.rss';
+const SAFE_RSS_URL = 'https://www.rfc-editor.org/rfcrss.xml';
 
 /**
  * Spooky explanation messages (see spooky-voice.md)
  */
 const EXPLANATIONS = {
-  fetchRss: (url: string) => `A fetch-rss node materializes at (80,120) with url: "${url}"`,
-  fetchJson: (url: string) => `A fetch-json node materializes at (80,120) with url: "${url}"`,
-  filter: (field: string, op: string, value: string) => `A filter node materializes at (300,120) - filtering ${field} ${op} "${value}"`,
-  sort: (field: string, order: string) => `A sort node materializes at (300,120) - sorting by ${field} (${order})`,
-  truncate: (limit: number) => `A truncate node materializes at (300,120) - limiting to ${limit} items`,
-  merge: "A merge node materializes at (300,120) - connecting parallel streams",
-  regex: (pattern: string, replacement: string) => `A regex node materializes at (300,120) - pattern: "${pattern}", replace: "${replacement}"`,
-  rename: (from: string, to: string) => `A rename node materializes — mapping "${from}" → "${to}"`,
-  outputJson: "An output-json node materializes at (520,120) - pulsing with data",
-  outputRss: "An output-rss node materializes at (520,120) - glowing with broadcast energy",
-  complete: "Pipes assembled. Ectoplasm humming...",
+  fetchRss: (url: string) =>
+    url.includes('rfc-editor.org')
+      ? 'Fetching the public RFC Editor feed.'
+      : `Fetching the RSS feed at ${url}.`,
+  fetchJson: (url: string) => `Fetching JSON from ${url}.`,
+  filter: (field: string, op: string, value: string) =>
+    `Keeping items whose ${field} ${op} "${value}".`,
+  sort: (field: string, order: string) =>
+    field === 'published' && order === 'desc'
+      ? 'Sorting by published date, newest first.'
+      : `Sorting by ${field} (${order}).`,
+  truncate: (limit: number) => `Keeping the first ${limit} items.`,
+  merge: 'Merging the streams into one list.',
+  regex: (pattern: string, replacement: string) =>
+    replacement
+      ? `Rewriting fields with pattern "${pattern}", replaced by "${replacement}".`
+      : `Rewriting fields with pattern "${pattern}".`,
+  rename: (from: string, to: string) => `Renaming "${from}" to "${to}".`,
+  outputJson: 'Publishing the result as JSON.',
+  outputRss: 'Publishing the result as RSS.',
+  complete: 'Pipes assembled. Ectoplasm humming...',
+  unrecognized:
+    'I only follow simple keywords in demo mode (rss, json, filter, sort, top…). Try a chip below, or add your own key for a live model.',
   error: "Something flickers... ah, an error! Let's fix it.",
 };
 
@@ -30,12 +42,41 @@ const EXPLANATIONS = {
  * Rule-based pipe builder from natural language prompt
  * Maps keywords to node types
  */
+/**
+ * Pull an http(s) URL out of a sentence, stripping trailing punctuation
+ * so "https://example.com/feed.xml," does not keep the comma.
+ */
+export function extractPromptUrl(prompt: string): string | null {
+  const match = prompt.match(/https?:\/\/[^\s'"`<>]+/i);
+  if (!match) return null;
+  return match[0].replace(/[),.;:!?\]\}]+$/g, '');
+}
+
+export function nameFromPrompt(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  const parts: string[] = [];
+  if (lower.includes('rfc-editor')) parts.push('RFC feed');
+  else if (/\brss\b|\bfeed\b/.test(lower)) parts.push('RSS feed');
+  else if (/\bjson\b/.test(lower)) parts.push('JSON feed');
+  const top = lower.match(/(?:top|first|limit)\s*(\d+)/);
+  if (top) parts.push(`top ${top[1]}`);
+  if (parts.length) return parts.join(', ').slice(0, 40);
+  const cleaned = prompt.replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+  return (cleaned.split(/[.!?]/)[0] || 'Ghost-Built Pipe').slice(0, 40) || 'Ghost-Built Pipe';
+}
+
+export type GhostBuildResult = {
+  pipe: PipeDefinition;
+  explanation: string[];
+  recognized: boolean;
+};
+
 export function buildPipeFromPrompt(
   prompt: string,
   options?: {
     llm?: (prompt: string) => Promise<string>;
   }
-): { pipe: PipeDefinition; explanation: string[] } {
+): GhostBuildResult {
   const explanation: string[] = [];
   const nodes: PipeNode[] = [];
   const edges: PipeEdge[] = [];
@@ -48,9 +89,7 @@ export function buildPipeFromPrompt(
     return `${type}-${nodeIdCounter}`;
   };
 
-  // Detect URL in prompt if present
-  const urlMatch = prompt.match(/https?:\/\/[^\s'"`]+/);
-  const promptUrl = urlMatch ? urlMatch[0] : null;
+  const promptUrl = extractPromptUrl(prompt);
 
   // Parse the prompt for keywords and build nodes
   let hasRss = false;
@@ -225,9 +264,52 @@ export function buildPipeFromPrompt(
     explanation.unshift(EXPLANATIONS.fetchRss(promptUrl || SAFE_RSS_URL));
   }
 
+  const recognized = hasRss || hasJson || hasFilter || hasSort || hasTruncate || hasMerge || hasRegex || hasRename;
+
+  // If nothing was recognized, use a safe default feed and say so clearly.
+  if (!recognized) {
+    nodes.length = 0;
+    edges.length = 0;
+    explanation.length = 0;
+    const nodeId = getNextNodeId('fetch-rss');
+    nodes.push({
+      id: nodeId,
+      type: 'fetch-rss',
+      config: { url: SAFE_RSS_URL },
+      position: { x: 80, y: 120 },
+    });
+    const outputNodeId = getNextNodeId('output-json');
+    nodes.push({
+      id: outputNodeId,
+      type: 'output-json',
+      config: { format: 'json' },
+      position: { x: 520, y: 120 },
+    });
+    edges.push({
+      id: `${nodeId}-${outputNodeId}`,
+      source: nodeId,
+      target: outputNodeId,
+    });
+    explanation.push(EXPLANATIONS.unrecognized);
+    explanation.push(EXPLANATIONS.fetchRss(SAFE_RSS_URL));
+    explanation.push(EXPLANATIONS.outputJson);
+    nodes.forEach((node, i) => {
+      node.position = { x: 80 + i * 220, y: 120 };
+    });
+    const pipe: PipeDefinition = {
+      id: `ghost-${Date.now()}`,
+      name: nameFromPrompt(prompt),
+      nodes,
+      edges,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    return { pipe, explanation, recognized: false };
+  }
+
   // Determine output format
   const outputNodeIds: string[] = [];
-  
+
   if (hasRss) {
     const nodeId = getNextNodeId('output-rss');
     nodes.push({
@@ -251,7 +333,7 @@ export function buildPipeFromPrompt(
   // Build edges (chain nodes sequentially)
   if (nodes.length >= 2) {
     const nonOutputNodes = nodes.filter(n => !outputNodeIds.includes(n.id));
-    
+
     for (let i = 0; i < nonOutputNodes.length - 1; i++) {
       edges.push({
         id: `${nonOutputNodes[i].id}-${nonOutputNodes[i + 1].id}`,
@@ -259,8 +341,7 @@ export function buildPipeFromPrompt(
         target: nonOutputNodes[i + 1].id,
       });
     }
-    
-    // Connect last non-output node to output node(s)
+
     if (nonOutputNodes.length > 0) {
       for (const outputId of outputNodeIds) {
         edges.push({
@@ -272,52 +353,23 @@ export function buildPipeFromPrompt(
     }
   }
 
-  // If no nodes were created, add a default fetch-rss with output-json
-  if (nodes.length === 0) {
-    const nodeId = getNextNodeId('fetch-rss');
-    nodes.push({
-      id: nodeId,
-      type: 'fetch-rss',
-      config: { url: SAFE_RSS_URL },
-      position: { x: 80, y: 120 },
-    });
-    explanation.push(EXPLANATIONS.fetchRss(SAFE_RSS_URL));
-
-    const outputNodeId = getNextNodeId('output-json');
-    nodes.push({
-      id: outputNodeId,
-      type: 'output-json',
-      config: { format: 'json' },
-      position: { x: 520, y: 120 },
-    });
-    outputNodeIds.push(outputNodeId);
-    explanation.push(EXPLANATIONS.outputJson);
-
-    edges.push({
-      id: `${nodeId}-${outputNodeId}`,
-      source: nodeId,
-      target: outputNodeId,
-    });
-  }
-
   // Normalize positions left-to-right for the editor canvas
   nodes.forEach((node, i) => {
     node.position = { x: 80 + i * 220, y: 120 };
   });
 
-  // Final explanation
   explanation.push(EXPLANATIONS.complete);
 
   const pipe: PipeDefinition = {
     id: `ghost-${Date.now()}`,
-    name: prompt.split('.')[0].slice(0, 50) || 'Ghost-Built Pipe',
+    name: nameFromPrompt(prompt),
     nodes,
     edges,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
-  return { pipe, explanation };
+  return { pipe, explanation, recognized: true };
 }
 
 /**

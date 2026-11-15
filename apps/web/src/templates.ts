@@ -9,47 +9,9 @@ export type PipeDefinition = {
 
 export const TEMPLATES: { id: string; name: string; blurb: string; pipe: PipeDefinition }[] = [
   {
-    id: 'rss-top-10',
-    name: 'RSS Top 10',
-    blurb: 'Fetch a public programming feed and keep the newest 10 items.',
-    pipe: {
-      id: 'template-rss-top-10',
-      name: 'RSS Top 10',
-      nodes: [
-        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.reddit.com/r/programming/.rss' }, position: { x: 80, y: 120 } },
-        { id: 'truncate-1', type: 'truncate', config: { limit: 10 }, position: { x: 360, y: 120 } },
-        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 640, y: 120 } },
-      ],
-      edges: [
-        { id: 'e1', source: 'fetch-rss-1', target: 'truncate-1' },
-        { id: 'e2', source: 'truncate-1', target: 'output-json-1' },
-      ],
-    },
-  },
-  {
-    id: 'json-filter-sort',
-    name: 'JSON Filter Sort',
-    blurb: 'Pull sample JSON posts, keep titles containing a word, sort ascending.',
-    pipe: {
-      id: 'template-json-filter-sort',
-      name: 'JSON Filter Sort',
-      nodes: [
-        { id: 'fetch-json-1', type: 'fetch-json', config: { url: 'https://jsonplaceholder.typicode.com/posts' }, position: { x: 60, y: 100 } },
-        { id: 'filter-1', type: 'filter', config: { field: 'title', op: 'contains', value: 'qui' }, position: { x: 320, y: 100 } },
-        { id: 'sort-1', type: 'sort', config: { field: 'id', order: 'asc' }, position: { x: 560, y: 100 } },
-        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 800, y: 100 } },
-      ],
-      edges: [
-        { id: 'e1', source: 'fetch-json-1', target: 'filter-1' },
-        { id: 'e2', source: 'filter-1', target: 'sort-1' },
-        { id: 'e3', source: 'sort-1', target: 'output-json-1' },
-      ],
-    },
-  },
-  {
     id: 'frontpage-digest',
     name: 'Frontpage Digest',
-    blurb: 'Fetch a public Atom feed, sort by published, keep the top 15.',
+    blurb: 'Fetch the public RFC Editor feed, sort by published date, keep the top 15.',
     pipe: {
       id: 'template-frontpage-digest',
       name: 'Frontpage Digest',
@@ -67,15 +29,53 @@ export const TEMPLATES: { id: string; name: string; blurb: string; pipe: PipeDef
     },
   },
   {
+    id: 'rss-top-10',
+    name: 'RSS Top 10',
+    blurb: 'Fetch the public RFC Editor feed and keep the newest 10 items.',
+    pipe: {
+      id: 'template-rss-top-10',
+      name: 'RSS Top 10',
+      nodes: [
+        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.rfc-editor.org/rfcrss.xml' }, position: { x: 80, y: 120 } },
+        { id: 'truncate-1', type: 'truncate', config: { limit: 10 }, position: { x: 360, y: 120 } },
+        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 640, y: 120 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'fetch-rss-1', target: 'truncate-1' },
+        { id: 'e2', source: 'truncate-1', target: 'output-json-1' },
+      ],
+    },
+  },
+  {
+    id: 'json-filter-sort',
+    name: 'JSON Filter Sort',
+    blurb: 'Fetch a public sample JSON list, keep titles that contain “rerum”, sort by id, emit JSON.',
+    pipe: {
+      id: 'template-json-filter-sort',
+      name: 'JSON Filter Sort',
+      nodes: [
+        { id: 'fetch-json-1', type: 'fetch-json', config: { url: 'https://jsonplaceholder.typicode.com/posts' }, position: { x: 60, y: 100 } },
+        { id: 'filter-1', type: 'filter', config: { field: 'title', op: 'contains', value: 'rerum' }, position: { x: 320, y: 100 } },
+        { id: 'sort-1', type: 'sort', config: { field: 'id', order: 'asc' }, position: { x: 560, y: 100 } },
+        { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 800, y: 100 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'fetch-json-1', target: 'filter-1' },
+        { id: 'e2', source: 'filter-1', target: 'sort-1' },
+        { id: 'e3', source: 'sort-1', target: 'output-json-1' },
+      ],
+    },
+  },
+  {
     id: 'keyword-watch',
     name: 'Keyword Watch',
-    blurb: 'Watch a feed for a keyword in the title, emit JSON.',
+    blurb: 'Watch the public RFC Editor feed for titles containing “Internet”, emit JSON.',
     pipe: {
       id: 'template-keyword-watch',
       name: 'Keyword Watch',
       nodes: [
-        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.reddit.com/r/technology/.rss' }, position: { x: 80, y: 140 } },
-        { id: 'filter-1', type: 'filter', config: { field: 'title', op: 'contains', value: 'AI' }, position: { x: 360, y: 140 } },
+        { id: 'fetch-rss-1', type: 'fetch-rss', config: { url: 'https://www.rfc-editor.org/rfcrss.xml' }, position: { x: 80, y: 140 } },
+        { id: 'filter-1', type: 'filter', config: { field: 'title', op: 'contains', value: 'Internet' }, position: { x: 360, y: 140 } },
         { id: 'truncate-1', type: 'truncate', config: { limit: 20 }, position: { x: 620, y: 140 } },
         { id: 'output-json-1', type: 'output-json', config: {}, position: { x: 880, y: 140 } },
       ],
@@ -89,7 +89,7 @@ export const TEMPLATES: { id: string; name: string; blurb: string; pipe: PipeDef
   {
     id: 'regex-cleanup',
     name: 'Regex Title Cleanup',
-    blurb: 'Fetch JSON, strip digits from titles with regex, rename a field.',
+    blurb: 'Fetch a public sample JSON list, strip digits from titles with regex, rename a field.',
     pipe: {
       id: 'template-regex-cleanup',
       name: 'Regex Title Cleanup',

@@ -6,10 +6,10 @@ This is a draft only. Kilian records and uploads the YouTube video himself. Do n
 
 ## Constraints (read before filming)
 
-- Show the **rule-based demo Ghost** as the default the jury will get. BYOK (a viewer’s own key) may be mentioned in one sentence; do not paste or display any API key, and do not film the Optional BYOK fields filled in.
+- Show the **rule-based demo Ghost** as the default the jury will get. A viewer’s own key may be mentioned in one sentence; do not paste or display any API key, and do not film the optional key fields filled in.
 - No third-party brand names or logos on screen or in the voice-over. For the gallery, pick **Frontpage Digest** (public RFC Editor feed). For the Ghost prompt, keep the default sentence that already includes `https://www.rfc-editor.org/rfcrss.xml`, or type that URL yourself. Do not open templates whose inspector would show other hostnames if you can avoid it.
 - No purchased or copyrighted music. Silence, room tone, or a short original / CC0 bed only — this script assumes **voice-over and UI sounds only, no music**.
-- Start the app locally (`npm run dev:all`) or on the approved demo URL once it exists. Also start `npm run dev:mcp` before the Kiro scene. If the hosted demo is on a Free tier, wait for it to wake so the first shot is not a spinner.
+- Start the app locally (`npm run dev` or `npm run dev:all`) or on the approved demo URL once it exists. Also start `npm run dev:mcp` before the Kiro scene. If the hosted demo is on a Free tier, wait about one minute for it to wake so the first shot is not a spinner.
 - On-screen text is already in English.
 
 Approximate spoken length is noted after each voice-over. Leave a beat for clicks and for a live run (feeds can take a few seconds).
@@ -18,7 +18,7 @@ Approximate spoken length is noted after each voice-over. Leave a beat for click
 
 ## 0:00–0:12 — Hook
 
-**On screen:** Browser full screen. Title bar of **Pipes from the Grave**: tombstone node palette on the left, empty-or-quiet canvas, footer “The graveyard is quiet.”
+**On screen:** Browser full screen, a fresh visit (or this origin’s storage cleared). Title bar of **Pipes from the Grave**: tombstone node palette on the left, the **Frontpage Digest** starter pipe already on the canvas, footer “The graveyard is quiet. Open Graveyard or summon the Ghost to begin.”
 
 **Voice-over:** “Classic visual feed pipes disappeared years ago. This is Pipes from the Grave — a browser editor that lets you fetch, filter, and export feeds again, with a Ghost that builds a pipe from one sentence.”
 
@@ -38,9 +38,9 @@ Approximate spoken length is noted after each voice-over. Leave a beat for click
 
 ## 0:32–0:58 — Ghost Séance (demo mode)
 
-**Action:** Click **Ghost Séance**. The dialog appears, including the line that demo rules are free and no key is required. Leave Optional BYOK empty. The prompt should read: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml, sort, top 5”. Click **Summon**. When the status says the Ghost built a pipe in **demo mode**, close the dialog. The canvas updates; **Last Ghost Words** appear in the inspector (rule-based lines such as a fetch-rss node materializing, a sort, a truncate, then “Pipes assembled.”).
+**Action:** Click **Ghost Séance**. The dialog appears, including the line that with no key the Ghost uses free built-in rules and does not understand free-form language. Leave the key field empty. The prompt should read: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click **Summon**. Select the Fetch RSS node and confirm the inspector **Feed URL** is `https://www.rfc-editor.org/rfcrss.xml` with no trailing comma. When the footer says the Ghost built a pipe in **demo mode**, close the dialog. The canvas shows the tombstones (fetch, sort, truncate, output). Do not lean on **Last Ghost Words** as the proof shot.
 
-**Voice-over:** “Or I describe the pipe in a sentence and summon the Ghost. For the jury, the default is a free, rule-based demo — no API key. You can later paste your own key in the browser if you want a live model; that key never sits on our server. Watch the tombstones appear, and the Ghost explain what it built.”
+**Voice-over:** “Or I describe the pipe in a sentence and summon the Ghost. For the jury, the default is a free, rule-based demo — no API key. You can later paste your own key in the browser if you want a live model. It stays in your browser and is sent only to the provider you pick — never stored on our server. We will not type a key in this video. Watch the tombstones appear.”
 
 (~18s)
 

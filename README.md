@@ -14,7 +14,7 @@ A spooky visual feed and data pipe editor. Drag nodes, connect ectoplasm edges, 
 - Graveyard template gallery (frontpage digest, keyword watch, regex cleanup, …)
 - Pipe engine with Fetch RSS/JSON, Filter, Sort, Merge, Truncate, Regex, Rename, Output RSS/JSON
 - Property-based / unit tests for core transforms (engine + rate-limit + MCP)
-- Ghost builder: natural language → pipe (rule-based **demo mode** by default; optional browser BYOK for an allowlisted provider)
+- Ghost builder: natural language → pipe (rule-based **demo mode** by default; optional browser-pasted key for an allowlisted provider)
 - Fastify API with `/api/*` and public `/p/:id.json|.rss`
 - MCP stdio server with a proper `tools/list` / `tools/call` interface (prefers the running HTTP API)
 - `/.kiro` steering, specs, hooks notes, custom agent, and MCP settings
@@ -28,11 +28,13 @@ A spooky visual feed and data pipe editor. Drag nodes, connect ectoplasm edges, 
 
 ```bash
 npm install
-npm run dev:all
+npm run dev
 ```
 
-- Web UI: http://localhost:5173
-- API health: http://localhost:8787/api/health
+(`npm run dev:all` is the same command.)
+
+- Web UI: http://127.0.0.1:5173
+- API health: http://127.0.0.1:8787/api/health
 
 No API keys are required. The Ghost builder runs in rule-based demo mode by default.
 
@@ -51,7 +53,7 @@ Copy `.env.example` if you want to override ports or CORS. See [docs/HOSTING.md]
 |---|---|
 | `npm test` | Run workspace tests (engine, server, MCP) |
 | `npm run build` | Build workspaces |
-| `npm run dev:all` | API + web together |
+| `npm run dev` / `npm run dev:all` | API (8787) and web UI (5173) together |
 | `npm run dev:mcp` | Start the MCP stdio server |
 
 ## Demo mode and optional BYOK (Ghost)
@@ -104,7 +106,7 @@ This project was designed and built with Kiro CLI. The session log is in [docs/K
 - **MCP** (`.kiro/settings/mcp.json`): points Kiro at the `packages/mcp` stdio server, which prefers the running HTTP API via `PIPES_API_BASE`.
 - **Custom agent** (`.kiro/agents/crypt-keeper.md`): a review agent for SSRF safety, valid graphs, spooky voice, and no third-party brand names. It is present in the repo; the usage log does not record a separate review session with it.
 
-Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding, the first web draft, and later rate-limit and Ghost server pieces. Human/agent follow-up fixed tests, SSRF validation order, web template issues, tsconfig emit cleanup, séance/rate-limit UI, the template gallery, the MCP HTTP bridge, and RSS CDATA parsing so live fetches show titles.
+Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding, the first web draft, and later rate-limit and Ghost server pieces. Human/agent follow-up fixed tests, SSRF validation order, web template issues, tsconfig emit cleanup, séance/rate-limit UI, the template gallery, the MCP HTTP bridge, RSS CDATA parsing so live fetches show titles, the optional browser key path for the Ghost, and later UX fixes for the demo prompt and first visit.
 
 ## Kiro usage log
 

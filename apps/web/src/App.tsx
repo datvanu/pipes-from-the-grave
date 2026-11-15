@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 import { TEMPLATES, type PipeDefinition } from './templates'
 import { apiUrl } from './api'
 import { clearGhostByok, loadGhostByok, saveGhostByok } from './ghostKey'
+import { Modal } from './Modal'
 
 const PALETTE = [
   { type: 'fetch-rss', label: 'Fetch RSS', color: '#55ff99' },
@@ -30,6 +31,51 @@ const PALETTE = [
   { type: 'output-rss', label: 'Output RSS', color: '#ff5555' },
   { type: 'output-json', label: 'Output JSON', color: '#ffff55' },
 ] as const
+
+const DEFAULT_GHOST_PROMPT =
+  'Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5'
+
+const GHOST_CHIPS = [
+  DEFAULT_GHOST_PROMPT,
+  'Filter an RSS feed about rust, top 10',
+  'Fetch JSON, sort, keep the first 8',
+]
+
+const INSPECTOR_FIELDS: Record<string, { key: string; label: string; kind?: 'text' | 'textarea' }[]> = {
+  'fetch-rss': [{ key: 'url', label: 'Feed URL' }],
+  'fetch-json': [{ key: 'url', label: 'Feed URL' }],
+  filter: [
+    { key: 'field', label: 'Field' },
+    { key: 'op', label: 'Match' },
+    { key: 'value', label: 'Keep items whose value is' },
+  ],
+  sort: [
+    { key: 'field', label: 'Field' },
+    { key: 'order', label: 'Order' },
+  ],
+  truncate: [{ key: 'limit', label: 'Limit' }],
+  regex: [
+    { key: 'field', label: 'Field' },
+    { key: 'pattern', label: 'Pattern' },
+    { key: 'replacement', label: 'Replacement' },
+  ],
+  rename: [{ key: 'mapping', label: 'Field mapping (JSON)', kind: 'textarea' }],
+  merge: [],
+  'output-rss': [],
+  'output-json': [],
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setReduced(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+  return reduced
+}
 
 type PipeNodeData = {
   label: string
@@ -74,7 +120,7 @@ function TombstoneNode({ data, selected }: { data: PipeNodeData; selected?: bool
 
 const rfNodeTypes = { tombstone: TombstoneNode }
 
-function toFlow(pipe: PipeDefinition): { nodes: Node[]; edges: Edge[] } {
+function toFlow(pipe: PipeDefinition, animated = true): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = pipe.nodes.map((n, i) => {
     const meta = PALETTE.find((p) => p.type === n.type) || PALETTE[0]
     return {
@@ -93,7 +139,7 @@ function toFlow(pipe: PipeDefinition): { nodes: Node[]; edges: Edge[] } {
     id: e.id,
     source: e.source,
     target: e.target,
-    animated: true,
+    animated,
     style: { stroke: '#55ff99', strokeWidth: 2 },
   }))
   return { nodes, edges }
@@ -140,7 +186,7 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [ghostOpen, setGhostOpen] = useState(false)
-  const [ghostPrompt, setGhostPrompt] = useState('Fetch RSS from https://www.rfc-editor.org/rfcrss.xml, sort, top 5')
+  const [ghostPrompt, setGhostPrompt] = useState(DEFAULT_GHOST_PROMPT)
   const [ghostLines, setGhostLines] = useState<string[]>([])
   const [lastGhostLines, setLastGhostLines] = useState<string[]>([])
   const [outputOpen, setOutputOpen] = useState(false)
@@ -158,6 +204,16 @@ export default function App() {
   const [ghostModel, setGhostModel] = useState('')
   const [ghostFallback, setGhostFallback] = useState('')
   const [ghostByokReady, setGhostByokReady] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
+  const [draftTouched, setDraftTouched] = useState(false)
+  const [pauseMotion, setPauseMotion] = useState(false)
+  const [hostWait, setHostWait] = useState(false)
+  const [actionWait, setActionWait] = useState(false)
+  const slowWait = hostWait || actionWait
+  const [unrecognizedDemo, setUnrecognizedDemo] = useState(false)
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const allowMotion = !prefersReducedMotion && !pauseMotion
+  const ghostPromptRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     const saved = loadGhostByok()
@@ -181,47 +237,86 @@ export default function App() {
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId])
 
   useEffect(() => {
-    const raw = localStorage.getItem('pipes-grave-draft')
-    if (raw) {
-      try {
-        const draft = JSON.parse(raw) as { name?: string; nodes: Node[]; edges: Edge[]; savedPipeId?: string }
-        setPipeName(draft.name || 'Untitled Pipe')
-        setNodes(draft.nodes || [])
-        setEdges(draft.edges || [])
-        if (draft.savedPipeId) setSavedPipeId(draft.savedPipeId)
-        setStatus('A draft rises from localStorage...')
-        return
-      } catch {
-        /* ignore */
+    let restored = false
+    try {
+      const raw = localStorage.getItem('pipes-grave-draft')
+      if (raw) {
+        const draft = JSON.parse(raw) as { name?: string; nodes?: Node[]; edges?: Edge[]; savedPipeId?: string }
+        if (Array.isArray(draft.nodes) && draft.nodes.length > 0) {
+          setPipeName(draft.name || 'Untitled Pipe')
+          setNodes(draft.nodes)
+          setEdges(draft.edges || [])
+          if (draft.savedPipeId) setSavedPipeId(draft.savedPipeId)
+          setStatus('Restored your last draft from this browser.')
+          restored = true
+        }
       }
+    } catch {
+      /* ignore broken drafts */
     }
-    const starter = toFlow(TEMPLATES[0].pipe)
-    setPipeName(TEMPLATES[0].pipe.name)
-    setNodes(starter.nodes)
-    setEdges(starter.edges)
+    if (!restored) {
+      const starter = TEMPLATES.find((item) => item.id === 'frontpage-digest') || TEMPLATES[0]
+      const flow = toFlow(starter.pipe, allowMotion)
+      setPipeName(starter.pipe.name)
+      setNodes(flow.nodes)
+      setEdges(flow.edges)
+      setStatus('The graveyard is quiet. Open Graveyard or summon the Ghost to begin.')
+    }
+    setDraftReady(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- first-load hydrate only
   }, [setNodes, setEdges])
 
   useEffect(() => {
+    if (!draftReady || !draftTouched) return
     localStorage.setItem(
       'pipes-grave-draft',
       JSON.stringify({ name: pipeName, nodes, edges, savedPipeId }),
     )
-  }, [pipeName, nodes, edges, savedPipeId])
+  }, [draftReady, draftTouched, pipeName, nodes, edges, savedPipeId])
+
+  useEffect(() => {
+    setEdges((current) => current.map((edge) => ({ ...edge, animated: allowMotion })))
+  }, [allowMotion, setEdges])
+
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setHostWait(true)
+    }, 2500)
+    fetch(apiUrl('/api/health')).finally(() => {
+      window.clearTimeout(timer)
+      if (!cancelled) setHostWait(false)
+    })
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!busy) {
+      setActionWait(false)
+      return
+    }
+    const timer = window.setTimeout(() => setActionWait(true), 2500)
+    return () => window.clearTimeout(timer)
+  }, [busy])
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      setDraftTouched(true)
       setEdges((eds) =>
         addEdge(
           {
             ...connection,
-            animated: true,
+            animated: allowMotion,
             style: { stroke: '#55ff99', strokeWidth: 2 },
           },
           eds,
         ),
       )
     },
-    [setEdges],
+    [setEdges, allowMotion],
   )
 
   const addNode = (type: string) => {
@@ -240,10 +335,12 @@ export default function App() {
     }
     setNodes((ns) => [...ns, node])
     setSelectedId(id)
+    setDraftTouched(true)
   }
 
   const updateSelectedConfig = (key: string, value: string) => {
     if (!selected) return
+    setDraftTouched(true)
     setNodes((ns) =>
       ns.map((n) => {
         if (n.id !== selected.id) return n
@@ -278,7 +375,7 @@ export default function App() {
   const loadTemplate = (id: string) => {
     const t = TEMPLATES.find((x) => x.id === id)
     if (!t) return
-    const flow = toFlow(t.pipe)
+    const flow = toFlow(t.pipe, allowMotion)
     setPipeName(t.pipe.name)
     setNodes(flow.nodes)
     setEdges(flow.edges)
@@ -286,6 +383,7 @@ export default function App() {
     setOutputs([])
     setRunMeta({})
     setSavedPipeId(null)
+    setDraftTouched(true)
     setStatus(`Template "${t.name}" awakens.`)
     setGalleryOpen(false)
   }
@@ -340,6 +438,7 @@ export default function App() {
     setBusy(true)
     setGhostLines(['The Ghost listens...'])
     setGhostFallback('')
+    setUnrecognizedDemo(false)
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       const key = ghostKey.trim()
@@ -359,18 +458,24 @@ export default function App() {
       }
       const data = await res.json()
       const pipe = data.pipe as PipeDefinition
-      const flow = toFlow(pipe)
+      const flow = toFlow(pipe, allowMotion)
       setPipeName(pipe.name || ghostPrompt.slice(0, 40))
       setNodes(flow.nodes)
       setEdges(flow.edges)
       setSavedPipeId(null)
+      setDraftTouched(true)
       const lines = Array.isArray(data.explanation) ? data.explanation : [String(data.explanation || '')]
       setGhostLines(lines)
       setLastGhostLines(lines)
+      setUnrecognizedDemo(data.mode === 'demo' && data.recognized === false)
       if (typeof data.fallbackReason === 'string' && data.fallbackReason) {
         setGhostFallback(data.fallbackReason)
       }
-      setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes${data.mode ? ` (${data.mode} mode)` : ''}. Review the canvas, then Run.`)
+      if (data.mode === 'demo' && data.recognized === false) {
+        setStatus('Demo mode did not recognize that sentence. Try a chip in Ghost Séance, or review the fallback pipe.')
+      } else {
+        setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes${data.mode ? ` (${data.mode} mode)` : ''}. Review the canvas, then Run.`)
+      }
     } catch (err) {
       setGhostLines([`Something flickers... ${err instanceof Error ? err.message : String(err)}`])
     } finally {
@@ -382,7 +487,8 @@ export default function App() {
   const selectedSouls = selectedId ? itemsByNode[selectedId] || [] : []
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0b0b10', color: '#e8e8f0' }}>
+    <div className={allowMotion ? undefined : (prefersReducedMotion ? "reduced-motion" : "motion-paused")} style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0b0b10', color: '#e8e8f0' }}>
+      <a className="skip-link" href="#pipe-canvas">Skip to canvas</a>
       <header
         style={{
           display: 'flex',
@@ -399,9 +505,22 @@ export default function App() {
         </h1>
         <input
           value={pipeName}
-          onChange={(e) => setPipeName(e.target.value)}
+          onChange={(e) => {
+            setPipeName(e.target.value)
+            setDraftTouched(true)
+          }}
           aria-label="Pipe name"
-          style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: '6px 10px' }}
+          style={{
+            background: '#1a1a22',
+            color: '#fff',
+            border: '1px solid #333',
+            borderRadius: 6,
+            padding: '6px 10px',
+            maxWidth: 240,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setGalleryOpen(true)} disabled={busy}>Graveyard</button>
@@ -410,11 +529,26 @@ export default function App() {
             Debug Souls
           </button>
           <button onClick={runPipe} disabled={busy || nodes.length === 0}>Run</button>
+          {!prefersReducedMotion && (
+            <button
+              type="button"
+              aria-pressed={!allowMotion}
+              onClick={() => setPauseMotion((value) => !value)}
+            >
+              {pauseMotion ? 'Resume motion' : 'Pause motion'}
+            </button>
+          )}
         </div>
       </header>
 
+      {slowWait && (
+        <div role="status" aria-live="polite" style={{ background: '#152418', color: '#d7ffe8', padding: '8px 16px', borderBottom: '1px solid #2a5a3a' }}>
+          Waking the demo host can take about a minute. Please wait…
+        </div>
+      )}
+
       {runMeta.error && (
-        <div style={{ background: '#3a1518', color: '#ffb0b8', padding: '8px 16px', borderBottom: '1px solid #66222a' }}>
+        <div role="alert" style={{ background: '#3a1518', color: '#ffb0b8', padding: '8px 16px', borderBottom: '1px solid #66222a' }}>
           <strong>Haunt:</strong> {runMeta.error}
           {runMeta.status === 429 && runMeta.resetMs != null && (
             <span> — retry in ~{Math.ceil(runMeta.resetMs / 1000)}s</span>
@@ -423,8 +557,8 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <aside style={{ width: 200, borderRight: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
-          <h3 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Node Palette</h3>
+        <aside aria-label="Node palette" style={{ width: 200, borderRight: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
+          <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99', fontSize: 18 }}>Node Palette</h2>
           {PALETTE.map((p) => (
             <button
               key={p.type}
@@ -448,7 +582,7 @@ export default function App() {
           ))}
         </aside>
 
-        <main style={{ flex: 1 }}>
+        <main id="pipe-canvas" style={{ flex: 1 }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -465,31 +599,31 @@ export default function App() {
           </ReactFlow>
         </main>
 
-        <aside style={{ width: 300, borderLeft: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
-          <h3 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Inspector</h3>
+        <aside aria-label="Inspector" style={{ width: 300, borderLeft: '1px solid #2a2a35', padding: 12, background: '#111118', overflow: 'auto' }}>
+          <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99', fontSize: 18 }}>Inspector</h2>
           {!selected && <p style={{ opacity: 0.7 }}>Select a tombstone to configure it.</p>}
           {selected && (
             <div style={{ display: 'grid', gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.7 }}>{(selected.data as PipeNodeData).nodeType}</div>
-              {['url', 'field', 'op', 'value', 'order', 'limit', 'pattern', 'replacement'].map((key) => (
-                <label key={key} style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-                  {key}
-                  <input
-                    value={cfg[key] == null ? '' : String(cfg[key])}
-                    onChange={(e) => updateSelectedConfig(key, e.target.value)}
-                    style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-                  />
+              {(INSPECTOR_FIELDS[(selected.data as PipeNodeData).nodeType] || []).map((field) => (
+                <label key={field.key} style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                  {field.label}
+                  {field.kind === 'textarea' ? (
+                    <textarea
+                      value={typeof cfg[field.key] === 'object' ? JSON.stringify(cfg[field.key], null, 2) : String(cfg[field.key] || '')}
+                      onChange={(e) => updateSelectedConfig(field.key, e.target.value)}
+                      rows={4}
+                      style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
+                    />
+                  ) : (
+                    <input
+                      value={cfg[field.key] == null ? '' : String(cfg[field.key])}
+                      onChange={(e) => updateSelectedConfig(field.key, e.target.value)}
+                      style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
+                    />
+                  )}
                 </label>
               ))}
-              <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-                mapping (JSON)
-                <textarea
-                  value={typeof cfg.mapping === 'object' ? JSON.stringify(cfg.mapping, null, 2) : String(cfg.mapping || '')}
-                  onChange={(e) => updateSelectedConfig('mapping', e.target.value)}
-                  rows={4}
-                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-                />
-              </label>
               {selectedSouls.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ fontFamily: 'Cinzel, serif', color: '#9dffc2', fontSize: 13 }}>
@@ -518,7 +652,7 @@ export default function App() {
       </div>
 
       <footer style={{ padding: '8px 16px', borderTop: '1px solid #2a2a35', background: '#111118', fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <span>{status}</span>
+        <span role="status" aria-live="polite">{status}</span>
         {typeof runMeta.remaining === 'number' && (
           <span style={{ opacity: 0.8 }}>Rate limit remaining: {runMeta.remaining}</span>
         )}
@@ -567,122 +701,146 @@ export default function App() {
         </div>
       )}
 
-      {galleryOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', display: 'grid', placeItems: 'center', zIndex: 50 }}>
-          <div style={{ width: 640, maxHeight: '80vh', overflow: 'auto', background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
-            <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Graveyard Templates</h2>
-            <p style={{ opacity: 0.8 }}>Pick a resting pipe to awaken. No third-party brand marks — just public feeds.</p>
-            <div style={{ display: 'grid', gap: 10 }}>
-              {TEMPLATES.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => loadTemplate(t.id)}
-                  style={{ textAlign: 'left', background: '#1a1a22', border: '1px solid #333', borderRadius: 8, padding: 12 }}
-                >
-                  <div style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>{t.name}</div>
-                  <div style={{ fontSize: 13, opacity: 0.8 }}>{t.blurb}</div>
-                </button>
-              ))}
-            </div>
-            <button style={{ marginTop: 12 }} onClick={() => setGalleryOpen(false)}>Close</button>
-          </div>
+      <Modal
+        open={galleryOpen}
+        titleId="graveyard-title"
+        title="Graveyard Templates"
+        width={640}
+        onClose={() => setGalleryOpen(false)}
+      >
+        <p style={{ opacity: 0.8 }}>
+          Pick a resting pipe to awaken. This replaces the canvas. No third-party brand marks — just public feeds.
+        </p>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {TEMPLATES.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => loadTemplate(item.id)}
+              style={{ textAlign: 'left', background: '#1a1a22', border: '1px solid #333', borderRadius: 8, padding: 12 }}
+            >
+              <div style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>{item.name}</div>
+              <div style={{ fontSize: 13, opacity: 0.8 }}>{item.blurb}</div>
+            </button>
+          ))}
         </div>
-      )}
+        <button style={{ marginTop: 12 }} onClick={() => setGalleryOpen(false)}>Close</button>
+      </Modal>
 
-      {ghostOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.72)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 50,
-          }}
-        >
-          <div style={{ width: 560, background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
-            <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Ghost Séance</h2>
-            <p style={{ opacity: 0.8 }}>
-              Speak a sentence. The Ghost shapes a pipe with built-in demo rules — free, no key required.
-              Optionally paste your own key for an allowlisted OpenAI-compatible provider. The key stays in
-              this browser (session storage, or local storage only if you opt in). It is sent only with each
-              Summon request and is never stored on the server.
-            </p>
-            <textarea
-              value={ghostPrompt}
-              onChange={(e) => setGhostPrompt(e.target.value)}
-              rows={4}
-              style={{ width: '100%', background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 8, padding: 8 }}
-            />
-            <fieldset style={{ marginTop: 12, border: '1px solid #2a2a35', borderRadius: 8, padding: 10 }}>
-              <legend style={{ fontFamily: 'Cinzel, serif', color: '#9dffc2', padding: '0 6px' }}>Optional BYOK</legend>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
-                Provider
-                <select
-                  value={ghostProvider}
-                  onChange={(e) => setGhostProvider(e.target.value)}
-                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-                >
-                  <option value="openai">OpenAI (api.openai.com)</option>
-                </select>
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
-                Model (optional)
-                <input
-                  value={ghostModel}
-                  onChange={(e) => setGhostModel(e.target.value)}
-                  placeholder="Default: gpt-4o-mini"
-                  autoComplete="off"
-                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-                />
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
-                Your API key
-                <input
-                  type="password"
-                  value={ghostKey}
-                  onChange={(e) => setGhostKey(e.target.value)}
-                  placeholder="Leaves this box only as a request header"
-                  autoComplete="off"
-                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
-                />
-              </label>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={ghostPersist}
-                  onChange={(e) => setGhostPersist(e.target.checked)}
-                />
-                Remember this key in this browser (local storage)
-              </label>
-              <button
-                type="button"
-                style={{ marginTop: 8 }}
-                onClick={() => {
-                  clearGhostByok()
-                  setGhostKey('')
-                  setGhostPersist(false)
-                  setGhostModel('')
-                }}
-              >
-                Clear key
-              </button>
-            </fieldset>
-            {ghostFallback && (
-              <p style={{ color: '#ffb0b8', fontSize: 12, marginTop: 8 }}>Fell back to demo: {ghostFallback}</p>
-            )}
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={callGhost} disabled={busy}>Summon</button>
-              <button onClick={() => setGhostOpen(false)}>Close</button>
-            </div>
-            <ul>
-              {ghostLines.map((line, i) => (
-                <li key={i} style={{ color: '#9dffc2' }}>{line}</li>
-              ))}
-            </ul>
-          </div>
+            <Modal
+        open={ghostOpen}
+        titleId="ghost-title"
+        title="Ghost Séance"
+        width={560}
+        onClose={() => setGhostOpen(false)}
+        initialFocusRef={ghostPromptRef}
+      >
+        <p style={{ opacity: 0.8 }}>
+          Type a short sentence. With no key, the Ghost uses free built-in rules (words such as “rss”, “sort”, “top 5”).
+          It does not understand free-form language.
+        </p>
+        <p style={{ opacity: 0.8 }}>
+          Optional: paste your own API key for the provider below if you want a live model that can follow a fuller
+          sentence. The key stays in this browser until you close the tab — or until you click Clear key. If you tick
+          “Remember”, it is saved in this browser only. When you click Summon, the key is sent to that provider (the
+          host shown in the list), not stored on our server.
+        </p>
+        <label htmlFor="ghost-prompt" style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
+          Your sentence
+        </label>
+        <textarea
+          id="ghost-prompt"
+          ref={ghostPromptRef}
+          value={ghostPrompt}
+          onChange={(e) => setGhostPrompt(e.target.value)}
+          rows={4}
+          style={{ width: "100%", background: "#1a1a22", color: "#fff", border: "1px solid #333", borderRadius: 8, padding: 8 }}
+        />
+        {unrecognizedDemo && (
+          <p role="status" style={{ color: "#ffd7a8", fontSize: 13, marginTop: 8 }}>
+            I only follow simple keywords in demo mode (rss, json, filter, sort, top…). Try a chip below, or add your
+            own key for a live model.
+          </p>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          {GHOST_CHIPS.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => setGhostPrompt(chip)}
+              style={{ fontSize: 12, padding: "6px 8px", textAlign: "left", maxWidth: "100%" }}
+            >
+              {chip}
+            </button>
+          ))}
         </div>
-      )}
+        <fieldset style={{ marginTop: 12, border: "1px solid #2a2a35", borderRadius: 8, padding: 10 }}>
+          <legend style={{ fontFamily: "Cinzel, serif", color: "#9dffc2", padding: "0 6px" }}>Optional: your own API key</legend>
+          <label style={{ display: "grid", gap: 4, fontSize: 12, marginBottom: 8 }}>
+            Provider
+            <select
+              value={ghostProvider}
+              onChange={(e) => setGhostProvider(e.target.value)}
+              style={{ background: "#1a1a22", color: "#fff", border: "1px solid #333", borderRadius: 6, padding: 6 }}
+            >
+              <option value="openai">api.openai.com</option>
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: 12, marginBottom: 8 }}>
+            Model (optional)
+            <input
+              value={ghostModel}
+              onChange={(e) => setGhostModel(e.target.value)}
+              placeholder="Default model for the selected provider"
+              autoComplete="off"
+              style={{ background: "#1a1a22", color: "#fff", border: "1px solid #333", borderRadius: 6, padding: 6 }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: 12, marginBottom: 8 }}>
+            Your API key
+            <input
+              type="password"
+              value={ghostKey}
+              onChange={(e) => setGhostKey(e.target.value)}
+              placeholder="Sent only to the selected provider when you Summon"
+              autoComplete="off"
+              style={{ background: "#1a1a22", color: "#fff", border: "1px solid #333", borderRadius: 6, padding: 6 }}
+            />
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={ghostPersist}
+              onChange={(e) => setGhostPersist(e.target.checked)}
+            />
+            Remember this key on this device until I click Clear key
+          </label>
+          <button
+            type="button"
+            style={{ marginTop: 8 }}
+            disabled={!ghostKey && !ghostPersist}
+            onClick={() => {
+              clearGhostByok()
+              setGhostKey("")
+              setGhostPersist(false)
+              setGhostModel("")
+            }}
+          >
+            Clear saved key
+          </button>
+        </fieldset>
+        {ghostFallback && (
+          <p style={{ color: "#ffb0b8", fontSize: 12, marginTop: 8 }}>Fell back to demo: {ghostFallback}</p>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button onClick={callGhost} disabled={busy}>Summon</button>
+          <button onClick={() => setGhostOpen(false)}>Close</button>
+        </div>
+        <ul>
+          {ghostLines.map((line, i) => (
+            <li key={i} style={{ color: "#9dffc2" }}>{line}</li>
+          ))}
+        </ul>
+      </Modal>
 
       <style>{`
         button {
@@ -695,7 +853,35 @@ export default function App() {
           font-family: Cinzel, serif;
         }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:focus-visible,
+        input:focus-visible,
+        textarea:focus-visible,
+        select:focus-visible,
+        a:focus-visible {
+          outline: 2px solid #5EEAD4;
+          outline-offset: 2px;
+        }
         .react-flow__edge-path { filter: drop-shadow(0 0 4px #55ff99); }
+        .motion-paused .react-flow__edge-path,
+        .reduced-motion .react-flow__edge-path {
+          filter: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .react-flow__edge-path { filter: none; }
+        }
+        .skip-link {
+          position: absolute;
+          left: 8px;
+          top: -48px;
+          z-index: 100;
+          background: #1d3b2c;
+          color: #d7ffe8;
+          padding: 8px 12px;
+          border-radius: 8px;
+        }
+        .skip-link:focus {
+          top: 8px;
+        }
       `}</style>
     </div>
   )

@@ -10,7 +10,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "npm run dev -w @pipes/server",
     "dev:mcp": "npm run dev -w @pipes/mcp",
     "dev:web": "npm run dev -w @pipes/web",

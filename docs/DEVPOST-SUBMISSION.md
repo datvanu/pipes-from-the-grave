@@ -56,8 +56,8 @@ Visual feed pipes were a simple idea: fetch a feed, filter and sort it, and publ
 Pipes from the Grave is a browser editor for feed and data pipes.
 
 - Drag nodes from a palette (Fetch RSS, Fetch JSON, Filter, Sort, Merge, Truncate, Regex, Rename, Output RSS, Output JSON) and connect them on a canvas.
-- Open the **Graveyard** for templates (for example Frontpage Digest, keyword watch, regex cleanup), or start from an empty canvas.
-- Open **Ghost Séance**, type a sentence, and **Summon** a pipe. The default is a **free, rule-based demo** that maps keywords in the prompt to nodes. No API key is required. Optionally, a visitor may paste **their own** key for an allowlisted OpenAI-compatible provider (bring your own key). That key stays in the browser (session storage, or local storage only if they opt in), is sent only as a request header, and is not stored on the server. If the provider call fails, the Ghost falls back to the demo.
+- A first visit already shows the **Frontpage Digest** starter pipe. Open the **Graveyard** for more templates (for example Frontpage Digest, keyword watch, regex cleanup), or start from an empty canvas.
+- Open **Ghost Séance**, type a sentence, and **Summon** a pipe. The default is a **free, rule-based demo** that maps keywords in the prompt to nodes. No API key is required. Optionally, a visitor may paste **their own** key for an allowlisted model provider. That key stays in the browser (session storage, or local storage only if they opt in), is sent to that provider only as a request header when they click Summon, and is not stored on the server. If the provider call fails, the Ghost falls back to the demo.
 - **Run** executes the pipe on the server (SSRF-safe fetches, timeouts, rate limits). **Séance Debug** shows how many “souls” (items) passed each node. The output list is also shown in the editor.
 - Saved pipes are exported, without a login, at `/p/:id.json` and `/p/:id.rss`.
 - An MCP stdio server exposes tools (`list_nodes`, `list_pipes`, `get_pipe`, `create_pipe`, `add_node`, `add_connection`, `run_pipe`, `delete_pipe`, `ghost_build`) so Kiro or another agent can list, build, and run pipes against the same API.
@@ -71,7 +71,7 @@ A TypeScript npm-workspace monorepo:
 - `@pipes/web` — Vite, React, and React Flow editor (graveyard, ghost séance, inspector, séance debug).
 - `@pipes/mcp` — newline-delimited JSON-RPC MCP server (`tools/list`, `tools/call`) that prefers the live HTTP API.
 
-Local quick start is `npm install` and `npm run dev:all` (UI on port 5173, API on 8787). There is a Dockerfile and a hosting note for a later jury URL; nothing from this repo has been deployed yet.
+Local quick start is `npm install` and `npm run dev` (or `npm run dev:all`; UI on port 5173, API on 8787). There is a Dockerfile and a hosting note for a later jury URL; nothing from this repo has been deployed yet.
 
 ## How Kiro was used
 
@@ -86,38 +86,39 @@ This is the required Kiro write-up. It only restates [docs/KIRO-USAGE.md](KIRO-U
 - **Property-based tests:** Kiro’s engine session added a Vitest suite with fast-check on core transforms (for example filter is a subset, sort is stable, truncate/unique behaviour, broken feeds do not crash the parser).
 - **Powers:** not present in `/.kiro` and not described in the usage log. We did not use them.
 
-Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding, the first web draft, and later rate-limit and Ghost server pieces. Human/agent follow-up fixed tests, SSRF validation order, web template issues, accidental TypeScript emit, séance and rate-limit UI, the template gallery, the MCP HTTP bridge and `tools/list` interface, RSS CDATA parsing so live fetches show titles, hosting preparation, and the optional BYOK Ghost path.
+Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding, the first web draft, and later rate-limit and Ghost server pieces. Human/agent follow-up fixed tests, SSRF validation order, web template issues, accidental TypeScript emit, séance and rate-limit UI, the template gallery, the MCP HTTP bridge and `tools/list` interface, RSS CDATA parsing so live fetches show titles, hosting preparation, and the optional browser-key Ghost path.
 
 ## Challenges we ran into
 
 - Teaching the MCP server to speak a clean `tools/list` / `tools/call` interface with valid JSON Schemas, instead of ad-hoc method names, and proving it over stdio against a live API.
 - Keeping live fetches useful and safe: SSRF blocking, timeouts, and RSS titles hidden in CDATA.
-- A TypeScript emit that once wrote `.js` and `.d.ts` beside the engine source and had to be cleaned up so `npm run build` was trustworthy.
-- Deciding how the Ghost should work for judges: a real model needs a key, but this project must not ship or host anyone’s key. The answer we shipped is demo-by-default plus optional BYOK in the browser.
+- Cleaning accidental TypeScript emit out of the engine package so `npm run build` stayed trustworthy.
+- Deciding how the Ghost should work for judges: a real model needs a key, but this project must not ship or host anyone’s key. The answer we shipped is demo-by-default plus an optional key the visitor pastes in the browser.
 
 ## Accomplishments that we're proud of
 
 - A complete editor loop the jury can try: template or Ghost, run, inspect souls, export JSON and RSS, with no account and no key.
 - An MCP tool surface that matches the API, with tests for the tool list and a live `tools/call`.
 - Steering, specs, hook notes, and a custom agent committed under `/.kiro` at the repo root, plus an honest usage log of what Kiro did and what people fixed afterwards.
-- Property-based and unit tests around the engine, rate limits, and MCP (66 tests in the current workspace run).
+- Property-based and unit tests around the engine, rate limits, Ghost prompts, and MCP (78 tests in the current workspace run).
 
 ## What we learned
 
-Specs and steering paid off when several sessions had to stay on the same voice and node set. Hook recipes are useful even before hook JSON is installed, because they make the intended loop explicit. And for anything that talks to a model, “the default must work with zero secrets” is a product constraint, not an afterthought — BYOK has to be allowlisted and redacted, or it is safer not to offer it.
+Specs and steering paid off when several sessions had to stay on the same voice and node set. Hook recipes are useful even before hook JSON is installed, because they make the intended loop explicit. And for anything that talks to a model, “the default must work with zero secrets” is a product constraint, not an afterthought — a visitor-supplied key has to be allowlisted and redacted, or it is safer not to offer it.
 
 ## What's next for Pipes from the Grave
 
-Publish the GitHub repository, host the jury demo (pending approval), and record the official video from the script. After that, a security review of the public API and the BYOK header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
+Publish the GitHub repository, host the jury demo (pending approval), and record the official video from the script. After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
 
 ## How to test (for judges)
 
-1. Open `{{DEMO_URL}}` (allow a short cold start if the free host has slept).
-2. Click **Graveyard**, pick **Frontpage Digest**, click **Run**, and wait for Séance Output.
-3. Click **Ghost Séance**, leave the key field empty, **Summon** the default prompt, then **Run** again. Optionally open `/p/<id>.json` or `.rss` from the footer.
-4. No sign-in is required. A personal LLM key is optional and stays in your browser.
+1. Open `{{DEMO_URL}}`. If nobody has used the demo for a few minutes, the free host may take about one minute to wake. You should see the host’s loading page — please wait instead of refreshing right away.
+2. Click **Graveyard**, pick **Frontpage Digest**, click **Run**, and wait for Séance Output. This is the first proven path.
+3. Click **Ghost Séance**. Leave the key field empty. Use a prompt that the demo rules can parse, for example: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click Summon, check that the Fetch URL in the inspector has no trailing comma, then click Run. Optionally open `/p/<id>.json` or `.rss` from the footer.
+The default Ghost is rule-based: it looks for simple keywords. You do not need a key. A personal key is optional, stays in your browser, and is never required to try the editor.
+4. No sign-in is required. A personal key is optional, stays in your browser, and is sent only to the provider you pick when you Summon.
 
-To run from source: Node 20+, `npm install`, `npm run dev:all`. See the README.
+To run from source: Node 20+, `npm install`, `npm run dev` (or `npm run dev:all`). See the README.
 
 ## Built with
 

@@ -7,6 +7,7 @@ export default defineConfig({
   // Set VITE_BASE=/repo-name/ for a GitHub Pages project site.
   base: process.env.VITE_BASE || '/',
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {
