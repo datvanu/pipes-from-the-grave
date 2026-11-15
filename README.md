@@ -14,7 +14,7 @@ A spooky visual feed and data pipe editor. Drag nodes, connect ectoplasm edges, 
 - Graveyard template gallery (frontpage digest, keyword watch, regex cleanup, …)
 - Pipe engine with Fetch RSS/JSON, Filter, Sort, Merge, Truncate, Regex, Rename, Output RSS/JSON
 - Property-based / unit tests for core transforms (engine + rate-limit + MCP)
-- Ghost builder: natural language → pipe (rule-based **demo mode** by default; optional LLM hook later)
+- Ghost builder: natural language → pipe (rule-based **demo mode** by default; optional browser BYOK for an allowlisted provider)
 - Fastify API with `/api/*` and public `/p/:id.json|.rss`
 - MCP stdio server with a proper `tools/list` / `tools/call` interface (prefers the running HTTP API)
 - `/.kiro` steering, specs, hooks notes, custom agent, and MCP settings
@@ -54,13 +54,17 @@ Copy `.env.example` if you want to override ports or CORS. See [docs/HOSTING.md]
 | `npm run dev:all` | API + web together |
 | `npm run dev:mcp` | Start the MCP stdio server |
 
-## Demo mode (Ghost)
+## Demo mode and optional BYOK (Ghost)
 
 `POST /api/ghost` with `{ "prompt": "fetch rss about rust, sort, top 5" }`.
 
 The default is **demo mode**: a rule-based builder that maps keywords in the prompt to nodes. It needs no LLM and no secrets. The JSON response includes `"mode": "demo"`.
 
-`GHOST_MODE=demo` is the intended default until a later decision about a real LLM. `GHOST_LLM_URL` is reserved for that hook and is ignored unless a real LLM mode is wired up. See `.env.example`.
+Optionally, a visitor may bring their own key for an allowlisted OpenAI-compatible provider. The key stays in the browser (session storage, or local storage only if they opt in) and is sent only as the `X-Ghost-LLM-Key` request header. The server forwards that header once to the hardcoded provider URL, then forgets it. Keys are never stored, logged, or returned. If the provider call fails, the Ghost falls back to demo mode and sets `fallbackReason`. There is no project- or host-owned API key.
+
+The MCP `ghost_build` tool does not accept a key and always uses demo mode, so a key cannot leak through an agent session.
+
+See `.env.example` and the Ghost Séance panel in the editor.
 
 ## MCP
 

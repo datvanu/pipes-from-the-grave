@@ -9,8 +9,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pipeRouter } from './router.js';
 import type { PipeDefinition } from '@pipes/engine';
-import { isSafeUrl } from '@pipes/engine';
 import { checkRateLimit } from './rate-limit.js';
+import {
+  LOG_REDACT_PATHS,
+  buildPipeWithUserKey,
+  listPublicProviders,
+  payloadContainsSecret,
+  readGhostLlmKey,
+  redactSecrets,
+  resolveProvider,
+} from './ghost-llm.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,12 +69,19 @@ async function savePipesToFile(): Promise<void> {
   }
 }
 
+export type CreateAppOptions = {
+  logger?: boolean | Record<string, unknown>;
+  llmFetch?: typeof fetch;
+};
+
 /**
- * Initialize server
+ * Build the Fastify app without listening. Used by tests and startServer().
  */
-export async function startServer() {
+export async function createApp(options: CreateAppOptions = {}) {
   const app = Fastify({
-    logger: true,
+    logger: options.logger ?? {
+      redact: { paths: LOG_REDACT_PATHS, censor: '[REDACTED]' },
+    },
   });
 
   // CORS — localhost defaults for dev; set CORS_ORIGINS for a hosted frontend.
@@ -78,7 +93,7 @@ export async function startServer() {
   await app.register(cors, {
     origin: corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Ghost-LLM-Key'],
   });
 
   // Static files from the Vite build (apps/web/dist), overridable for containers.
@@ -118,11 +133,28 @@ export async function startServer() {
   // Pipe routes
   app.register(pipeRouter, { pipesStore, savePipesToFile });
 
+  // Never echo a user-supplied LLM key in a response body.
+  app.addHook('onSend', (request, _reply, payload, done) => {
+    const key = readGhostLlmKey(request.headers as Record<string, unknown>);
+    const secrets = key ? [key] : [];
+    if (payloadContainsSecret(payload, secrets) && (typeof payload === 'string' || Buffer.isBuffer(payload))) {
+      done(null, redactSecrets(payload.toString(), secrets));
+      return;
+    }
+    done(null, payload);
+  });
+
+  app.get('/api/ghost/providers', async () => {
+    return { providers: listPublicProviders() };
+  });
+
   // Ghost builder endpoint
   app.post('/api/ghost', async (request, reply) => {
+    const apiKey = readGhostLlmKey(request.headers as Record<string, unknown>);
+    const redact = (value: unknown) => redactSecrets(String(value ?? ''), apiKey ? [apiKey] : []);
     try {
-      const body = request.body as { prompt: string };
-      
+      const body = (request.body || {}) as { prompt?: string; provider?: string; model?: string };
+
       if (!body.prompt || typeof body.prompt !== 'string') {
         reply.code(400).send({ error: 'Missing or invalid prompt' });
         return;
@@ -142,23 +174,49 @@ export async function startServer() {
         return;
       }
 
-      // Demo mode is the default and requires no API keys.
-      // An LLM hook is not wired until Kilian decides otherwise.
-      const requestedMode = (process.env.GHOST_MODE || 'demo').toLowerCase();
-      const mode = requestedMode === 'llm' && process.env.GHOST_LLM_URL ? 'llm' : 'demo';
-      if (requestedMode === 'llm' && mode === 'demo') {
-        request.log.warn('GHOST_MODE=llm but GHOST_LLM_URL is unset; using rule-based demo');
+      const { buildPipeFromPrompt } = await import('./ghost.js');
+
+      // Default is the free, rule-based demo. A user-supplied key (BYOK) is
+      // forwarded once to an allowlisted provider and never stored.
+      if (!apiKey) {
+        const result = buildPipeFromPrompt(body.prompt);
+        reply.code(200).send({ ...result, mode: 'demo' });
+        return;
       }
 
-      const { buildPipeFromPrompt } = await import('./ghost.js');
-      const result = buildPipeFromPrompt(body.prompt);
+      if (body.provider && !resolveProvider(body.provider)) {
+        const result = buildPipeFromPrompt(body.prompt);
+        reply.code(200).send({
+          ...result,
+          mode: 'demo',
+          fallbackReason: 'Unknown provider; used the rule-based demo instead.',
+        });
+        return;
+      }
 
-      reply.code(200).send({ ...result, mode });
+      try {
+        const result = await buildPipeWithUserKey({
+          prompt: body.prompt,
+          apiKey,
+          providerId: body.provider,
+          model: body.model,
+          fetchFn: options.llmFetch,
+        });
+        reply.code(200).send({ ...result, mode: 'llm' });
+      } catch (error: any) {
+        request.log.warn({ err: redact(error?.message || error) }, 'Ghost LLM failed; falling back to demo');
+        const result = buildPipeFromPrompt(body.prompt);
+        reply.code(200).send({
+          ...result,
+          mode: 'demo',
+          fallbackReason: redact(error?.message || 'Ghost LLM failed; used the rule-based demo instead.'),
+        });
+      }
     } catch (error: any) {
-      console.error('Ghost builder error:', error);
-      reply.code(500).send({ 
-        error: 'Ghost builder failed', 
-        message: error.message 
+      request.log.error({ err: redact(error?.message || error) }, 'Ghost builder failed');
+      reply.code(500).send({
+        error: 'Ghost builder failed',
+        message: redact(error?.message || 'unknown error'),
       });
     }
   });
@@ -250,34 +308,36 @@ export async function startServer() {
     }
   });
 
-  // Start server
+  // SPA fallback for the hosted Vite build (non-API routes).
+  app.setNotFoundHandler(async (request, reply) => {
+    const url = request.raw.url || '';
+    if (url.startsWith('/api') || url.startsWith('/p/')) {
+      reply.code(404).send({ error: 'Not found' });
+      return;
+    }
+    if (webDistExists) {
+      return reply.sendFile('index.html');
+    }
+    reply.code(404).send({ error: 'Not found' });
+  });
+
+  return app;
+}
+
+/**
+ * Initialize and listen.
+ */
+export async function startServer() {
   try {
-    // Load from file if exists
     const loadedPipes = await loadPipesFromFile();
     for (const [id, pipe] of loadedPipes) {
       pipesStore.set(id, pipe);
     }
 
-    // SPA fallback for the hosted Vite build (non-API routes).
-    app.setNotFoundHandler(async (request, reply) => {
-      const url = request.raw.url || '';
-      if (url.startsWith('/api') || url.startsWith('/p/')) {
-        reply.code(404).send({ error: 'Not found' });
-        return;
-      }
-      if (webDistExists) {
-        return reply.sendFile('index.html');
-      }
-      reply.code(404).send({ error: 'Not found' });
-    });
-
+    const app = await createApp();
     await app.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`Server listening on port ${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/api/health`);
-    if (webDistExists) {
-      console.log(`Web UI: http://localhost:${PORT}/`);
-    }
-
     return app;
   } catch (error) {
     console.error('Failed to start server:', error);

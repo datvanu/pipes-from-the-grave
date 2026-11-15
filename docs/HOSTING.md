@@ -71,7 +71,7 @@ See `.env.example`. For a single-service deploy the important values are:
 |---|---|
 | `PORT` | Injected by the host, or `8787` |
 | `GHOST_MODE` | `demo` |
-| `GHOST_LLM_URL` | empty |
+| _(no LLM API key)_ | never set on the host; BYOK keys stay in the visitor’s browser |
 | `CORS_ORIGINS` | not required when the UI is served from the same origin; set it if the UI is on Pages |
 | `WEB_DIST_DIR` | unset (defaults to `apps/web/dist`) |
 | `VITE_API_BASE` | empty for same-origin |

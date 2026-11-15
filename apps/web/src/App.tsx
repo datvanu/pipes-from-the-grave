@@ -16,6 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { TEMPLATES, type PipeDefinition } from './templates'
 import { apiUrl } from './api'
+import { clearGhostByok, loadGhostByok, saveGhostByok } from './ghostKey'
 
 const PALETTE = [
   { type: 'fetch-rss', label: 'Fetch RSS', color: '#55ff99' },
@@ -139,7 +140,7 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [ghostOpen, setGhostOpen] = useState(false)
-  const [ghostPrompt, setGhostPrompt] = useState('Fetch an RSS feed about rust, sort it, top 5')
+  const [ghostPrompt, setGhostPrompt] = useState('Fetch RSS from https://www.rfc-editor.org/rfcrss.xml, sort, top 5')
   const [ghostLines, setGhostLines] = useState<string[]>([])
   const [lastGhostLines, setLastGhostLines] = useState<string[]>([])
   const [outputOpen, setOutputOpen] = useState(false)
@@ -151,6 +152,31 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [savedPipeId, setSavedPipeId] = useState<string | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [ghostKey, setGhostKey] = useState('')
+  const [ghostPersist, setGhostPersist] = useState(false)
+  const [ghostProvider, setGhostProvider] = useState('openai')
+  const [ghostModel, setGhostModel] = useState('')
+  const [ghostFallback, setGhostFallback] = useState('')
+  const [ghostByokReady, setGhostByokReady] = useState(false)
+
+  useEffect(() => {
+    const saved = loadGhostByok()
+    setGhostKey(saved.key)
+    setGhostPersist(saved.persist)
+    setGhostProvider(saved.provider)
+    setGhostModel(saved.model)
+    setGhostByokReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!ghostByokReady) return
+    saveGhostByok({
+      key: ghostKey,
+      persist: ghostPersist,
+      provider: ghostProvider,
+      model: ghostModel,
+    })
+  }, [ghostByokReady, ghostKey, ghostPersist, ghostProvider, ghostModel])
 
   const selected = useMemo(() => nodes.find((n) => n.id === selectedId) || null, [nodes, selectedId])
 
@@ -313,11 +339,19 @@ export default function App() {
   const callGhost = async () => {
     setBusy(true)
     setGhostLines(['The Ghost listens...'])
+    setGhostFallback('')
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const key = ghostKey.trim()
+      if (key) headers['X-Ghost-LLM-Key'] = key
       const res = await fetch(apiUrl('/api/ghost'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: ghostPrompt }),
+        headers,
+        body: JSON.stringify({
+          prompt: ghostPrompt,
+          provider: ghostProvider,
+          model: ghostModel.trim() || undefined,
+        }),
       })
       if (!res.ok) {
         const err = await readApiError(res)
@@ -333,6 +367,9 @@ export default function App() {
       const lines = Array.isArray(data.explanation) ? data.explanation : [String(data.explanation || '')]
       setGhostLines(lines)
       setLastGhostLines(lines)
+      if (typeof data.fallbackReason === 'string' && data.fallbackReason) {
+        setGhostFallback(data.fallbackReason)
+      }
       setStatus(`The Ghost built a pipe with ${pipe.nodes.length} nodes${data.mode ? ` (${data.mode} mode)` : ''}. Review the canvas, then Run.`)
     } catch (err) {
       setGhostLines([`Something flickers... ${err instanceof Error ? err.message : String(err)}`])
@@ -563,15 +600,77 @@ export default function App() {
             zIndex: 50,
           }}
         >
-          <div style={{ width: 520, background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
+          <div style={{ width: 560, background: '#16161f', border: '1px solid #55ff99', borderRadius: 12, padding: 16 }}>
             <h2 style={{ fontFamily: 'Cinzel, serif', color: '#55ff99' }}>Ghost Séance</h2>
-            <p style={{ opacity: 0.8 }}>Speak a sentence. The Ghost shapes a pipe (demo rules; optional LLM later).</p>
+            <p style={{ opacity: 0.8 }}>
+              Speak a sentence. The Ghost shapes a pipe with built-in demo rules — free, no key required.
+              Optionally paste your own key for an allowlisted OpenAI-compatible provider. The key stays in
+              this browser (session storage, or local storage only if you opt in). It is sent only with each
+              Summon request and is never stored on the server.
+            </p>
             <textarea
               value={ghostPrompt}
               onChange={(e) => setGhostPrompt(e.target.value)}
               rows={4}
               style={{ width: '100%', background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 8, padding: 8 }}
             />
+            <fieldset style={{ marginTop: 12, border: '1px solid #2a2a35', borderRadius: 8, padding: 10 }}>
+              <legend style={{ fontFamily: 'Cinzel, serif', color: '#9dffc2', padding: '0 6px' }}>Optional BYOK</legend>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
+                Provider
+                <select
+                  value={ghostProvider}
+                  onChange={(e) => setGhostProvider(e.target.value)}
+                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
+                >
+                  <option value="openai">OpenAI (api.openai.com)</option>
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
+                Model (optional)
+                <input
+                  value={ghostModel}
+                  onChange={(e) => setGhostModel(e.target.value)}
+                  placeholder="Default: gpt-4o-mini"
+                  autoComplete="off"
+                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, marginBottom: 8 }}>
+                Your API key
+                <input
+                  type="password"
+                  value={ghostKey}
+                  onChange={(e) => setGhostKey(e.target.value)}
+                  placeholder="Leaves this box only as a request header"
+                  autoComplete="off"
+                  style={{ background: '#1a1a22', color: '#fff', border: '1px solid #333', borderRadius: 6, padding: 6 }}
+                />
+              </label>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={ghostPersist}
+                  onChange={(e) => setGhostPersist(e.target.checked)}
+                />
+                Remember this key in this browser (local storage)
+              </label>
+              <button
+                type="button"
+                style={{ marginTop: 8 }}
+                onClick={() => {
+                  clearGhostByok()
+                  setGhostKey('')
+                  setGhostPersist(false)
+                  setGhostModel('')
+                }}
+              >
+                Clear key
+              </button>
+            </fieldset>
+            {ghostFallback && (
+              <p style={{ color: '#ffb0b8', fontSize: 12, marginTop: 8 }}>Fell back to demo: {ghostFallback}</p>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button onClick={callGhost} disabled={busy}>Summon</button>
               <button onClick={() => setGhostOpen(false)}>Close</button>
