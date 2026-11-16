@@ -63,7 +63,7 @@ Copy `.env.example` if you want to override ports or CORS. See [docs/HOSTING.md]
 
 The default is **demo mode**: a rule-based builder that maps keywords in the prompt to nodes. It needs no LLM and no secrets. The JSON response includes `"mode": "demo"`.
 
-Optionally, a visitor may bring their own key for an allowlisted model provider. The key stays in the browser (session storage, or local storage only if they opt in) and is sent only as the `X-Ghost-LLM-Key` request header. The server forwards that header once to the hardcoded provider URL, then forgets it — except when `GHOST_MODE=demo`, which is the hosted-demo setting and disables forwarding entirely. Keys are never stored, logged, or returned. If the provider call fails, the Ghost falls back to demo mode and sets `fallbackReason`. There is no project- or host-owned API key.
+Optionally, a visitor may bring their own key for an allowlisted model provider. The key stays in the browser (session storage, or local storage only if they opt in) and is sent only as the `X-Ghost-LLM-Key` request header. The server forwards that header once to the hardcoded provider URL, then forgets it. Setting `GHOST_MODE=demo` disables forwarding entirely; the hosted demo uses `GHOST_MODE=byok`, so the rule-based demo is the default and the key field is optional. Keys are never stored, logged, or returned. If the provider call fails, the Ghost falls back to demo mode and sets `fallbackReason`. There is no project- or host-owned API key.
 
 The MCP `ghost_build` tool does not accept a key and always uses demo mode, so a key cannot leak through an agent session.
 

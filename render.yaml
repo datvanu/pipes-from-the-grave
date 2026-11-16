@@ -11,8 +11,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # Rule-based demo stays the default in the UI. "byok" additionally lets
+      # visitors paste their own key (browser-only, forwarded per request to the
+      # allowlisted OpenAI endpoint, never stored). No key is set here.
       - key: GHOST_MODE
-        value: demo
+        value: byok
       - key: TRUST_PROXY
         value: "1"
       # After the Render account exists, set this to the public HTTPS origin

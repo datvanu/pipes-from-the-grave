@@ -9,7 +9,7 @@ The jury needs a URL to a running app until the end of judging (29 January 2027)
 | Part | Stack | Notes |
 |---|---|---|
 | Web editor | Vite → static `apps/web/dist` | React + React Flow. Talks to `/api/*`. |
-| API | Fastify (`apps/server`) | `POST /api/pipes` (server-assigned UUID, no public list or delete), `POST /api/pipes/run`, `/api/ghost` (demo mode; `GHOST_MODE=demo` blocks visitor-key forwarding), public `/p/:id.json` and `/p/:id.rss` with rate limits. Listens on `PORT` (default 8787), host `0.0.0.0`. |
+| API | Fastify (`apps/server`) | `POST /api/pipes` (server-assigned UUID, no public list or delete), `POST /api/pipes/run`, `/api/ghost` (rule-based demo by default; optional visitor key unless `GHOST_MODE=demo`), public `/p/:id.json` and `/p/:id.rss` with rate limits. Listens on `PORT` (default 8787), host `0.0.0.0`. |
 | Pipe engine | `@pipes/engine` (TypeScript) | Runs on the server. Browser fetches to third-party RSS/JSON feeds would fail CORS, so the engine should stay on the API. |
 | MCP | stdio (`packages/mcp`) | For local Kiro/agents only. Not required on the public demo URL. |
 
@@ -71,9 +71,9 @@ See `.env.example`. For a single-service deploy the important values are:
 | Variable | Demo value |
 |---|---|
 | `PORT` | Injected by the host, or `8787` |
-| `GHOST_MODE` | `demo` (disables visitor-key forwarding on this host) |
+| `GHOST_MODE` | `byok` (demo by default, optional visitor key; `demo` disables forwarding) |
 | `TRUST_PROXY` | `1` (so rate limits key off the client, not the Render proxy) |
-| _(no LLM API key)_ | never set on the host; visitor keys stay in the browser and are not forwarded while `GHOST_MODE=demo` |
+| _(no LLM API key)_ | never set on the host; visitor keys stay in the browser and are forwarded per request only to the allowlisted provider |
 | `CORS_ORIGINS` | not required when the UI is served from the same origin; set it if the UI is on Pages |
 | `WEB_DIST_DIR` | unset (defaults to `apps/web/dist`) |
 | `VITE_API_BASE` | empty for same-origin |
