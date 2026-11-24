@@ -9,7 +9,7 @@ Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the ru
 | Field | Value |
 |---|---|
 | Repo URL | https://github.com/datvanu/pipes-from-the-grave — public GitHub repo under `datvanu`, with `/.kiro` at the root and the MIT license visible in the About section. |
-| Demo URL | `{{DEMO_URL}}` — a running app the jury can use for free through 29 January 2027. Approved host: one Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)). Not deployed yet. No login; leave the private credentials field empty. The Free plan spins down after about 15 minutes idle; the next request takes about one minute to wake (Render shows a loading page). Say so in “How to test.” |
+| Demo URL | https://pipes-from-the-grave.onrender.com — running on a Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)). No login; leave the private credentials field empty. The Free plan spins down after about 15 minutes idle; the next request takes about one minute to wake (Render shows a loading page). Say so in “How to test.” |
 | Video URL | `{{VIDEO_URL}}` — public YouTube video, under 3 minutes. See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). Not recorded yet. |
 
 The Fastify process serves both the editor and `/api/*` on the same origin.
@@ -24,7 +24,7 @@ Confirm each box before Kilian submits on Devpost (deadline **4 December 2026, 2
 - [ ] Open-source **license file** in the repo (MIT, `LICENSE`) and shown in GitHub About.
 - [ ] Sources plus a README quick start so a judge can run or use the project.
 - [ ] **Video** under 3 minutes, public on **YouTube**, showing the project on the target device, with **no third-party brands** and **no copyrighted music** without permission.
-- [ ] **URL of a running app** (`{{DEMO_URL}}`) that judges can try at no cost through the end of judging (29 January 2027). Login credentials, if any, go in Devpost’s non-public field — this app has no login.
+- [x] **URL of a running app** (https://pipes-from-the-grave.onrender.com) that judges can try at no cost through the end of judging (29 January 2027). Login credentials, if any, go in Devpost’s non-public field — this app has no login.
 - [ ] Submission text in **English**.
 - [ ] Built with Kiro, plus the required **write-up of Kiro use** (see “How Kiro was used” below: CLI, custom agent file, hooks, specs, steering, MCP, property-based tests; no Powers).
 - [ ] Team size ≤ 3. Single-person / organization entry is allowed; Germany is not a restricted country.
@@ -71,7 +71,7 @@ A TypeScript npm-workspace monorepo:
 - `@pipes/web` — Vite, React, and React Flow editor (graveyard, ghost séance, inspector, séance debug).
 - `@pipes/mcp` — newline-delimited JSON-RPC MCP server (`tools/list`, `tools/call`) that prefers the live HTTP API.
 
-Local quick start is `npm install` and `npm run dev` (or `npm run dev:all`; UI on port 5173, API on 8787). The jury demo is a single Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)); the URL is not live yet. After deploy, the same origin serves the editor and `/api/*`.
+Local quick start is `npm install` and `npm run dev` (or `npm run dev:all`; UI on port 5173, API on 8787). The jury demo is a single Render Free web service in Frankfurt: https://pipes-from-the-grave.onrender.com (see [HOSTING.md](HOSTING.md)). The same origin serves the editor and `/api/*`.
 
 ## How Kiro was used
 
@@ -108,11 +108,11 @@ Specs and steering paid off when several sessions had to stay on the same voice 
 
 ## What's next for Pipes from the Grave
 
-Host the jury demo on Render Free and record the official video from the script. After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
+The jury demo is live on Render Free. Record and upload the official video from the script (a draft MP4 is ready locally; the YouTube URL is still a placeholder). After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
 
 ## How to test (for judges)
 
-1. Open `{{DEMO_URL}}`. This is a Render Free web service. If nobody has used the demo for about 15 minutes, the host may take about one minute to wake. You should see Render’s loading page — please wait instead of refreshing right away.
+1. Open https://pipes-from-the-grave.onrender.com. This is a Render Free web service. If nobody has used the demo for about 15 minutes, the host may take about one minute to wake. You should see Render’s loading page — please wait instead of refreshing right away.
 2. Click **Graveyard**, pick **Frontpage Digest**, click **Run**, and wait for Séance Output. This is the first proven path.
 3. Click **Ghost Séance**. Leave the key field empty. Use a prompt that the demo rules can parse, for example: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click Summon, check that the Fetch URL in the inspector has no trailing comma, then click Run. Optionally open `/p/<id>.json` or `.rss` from the footer. Those export links, and any server-saved pipe, last only until the free host sleeps; your browser draft and the Graveyard templates remain. Use **Download JSON** if you want a copy you can **Load JSON** later.
 The default Ghost is rule-based: it looks for simple keywords. You do not need a key.
