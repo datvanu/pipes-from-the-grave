@@ -10,7 +10,7 @@ Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the ru
 |---|---|
 | Repo URL | https://github.com/datvanu/pipes-from-the-grave — public GitHub repo under `datvanu`, with `/.kiro` at the root and the MIT license visible in the About section. |
 | Demo URL | https://pipes-from-the-grave.onrender.com — running on a Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)). No login; leave the private credentials field empty. The Free plan spins down after about 15 minutes idle; the next request takes about one minute to wake (Render shows a loading page). Say so in “How to test.” |
-| Video URL | `{{VIDEO_URL}}` — public YouTube video, under 3 minutes. See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). Not recorded yet. |
+| Video URL | `{{VIDEO_URL}}` — public YouTube video, under 3 minutes. See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). A local 1080p draft (about 2:30) is ready for Kilian to upload; fill this after the public YouTube URL exists. |
 
 The Fastify process serves both the editor and `/api/*` on the same origin.
 
