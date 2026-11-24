@@ -3,7 +3,7 @@
 FROM node:22-bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-RUN git clone https://github.com/datvanu/pipes-from-the-grave.git . && git checkout ba1bc10
+RUN git clone https://github.com/datvanu/pipes-from-the-grave.git . && git checkout 80c454b
 RUN npm ci && npm run build -w @pipes/web
 
 FROM node:22-bookworm-slim
