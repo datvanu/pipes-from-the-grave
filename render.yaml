@@ -1,26 +1,32 @@
 # Render blueprint for a single Free web service (UI + API).
-# Do not apply this blueprint or connect a Render account without Kilian's approval.
+# Approved: Render Free in Frankfurt, no payment method. Do not add a
+# card or upgrade the plan. Set PUBLIC_BASE_URL after the first deploy
+# once the public https://*.onrender.com origin is known.
 services:
   - type: web
     name: pipes-from-the-grave
     runtime: node
     plan: free
+    region: frankfurt
     buildCommand: npm ci && npm run build -w @pipes/web
     startCommand: ./node_modules/.bin/tsx apps/server/src/index.ts
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # Rule-based demo stays the default in the UI. "byok" additionally lets
-      # visitors paste their own key (browser-only, forwarded per request to the
-      # allowlisted OpenAI endpoint, never stored). No key is set here.
+      # Rule-based demo is the default (no key required).
+      # GHOST_ACCEPT_VISITOR_KEYS=true still lets visitors paste their own
+      # key (browser-only, forwarded per request to the allowlisted
+      # OpenAI endpoint, never stored). No host-owned key is set here.
       - key: GHOST_MODE
-        value: byok
+        value: demo
+      - key: GHOST_ACCEPT_VISITOR_KEYS
+        value: "true"
       - key: TRUST_PROXY
         value: "1"
-      # After the Render account exists, set this to the public HTTPS origin
-      # (for example https://YOUR-SERVICE.onrender.com) so export links are
-      # absolute. Until then the host serves relative /p/:id links and does
-      # not trust the Host or Forwarded headers.
+      # After the first deploy, set this to the public HTTPS origin
+      # (for example https://pipes-from-the-grave.onrender.com) so export
+      # links are absolute. Until then the host serves relative /p/:id
+      # links and does not trust the Host or Forwarded headers.
       # - key: PUBLIC_BASE_URL
       #   value: https://YOUR-SERVICE.onrender.com

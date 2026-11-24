@@ -245,7 +245,9 @@ describe('pipe API store and exports', () => {
 
   it('advertises ghost config and security headers on health', async () => {
     const previous = process.env.GHOST_MODE;
+    const previousAccept = process.env.GHOST_ACCEPT_VISITOR_KEYS;
     delete process.env.GHOST_MODE;
+    delete process.env.GHOST_ACCEPT_VISITOR_KEYS;
     const app = await createApp({ logger: false });
     const open = await app.inject({ method: 'GET', url: '/api/health' });
     expect(open.statusCode).toBe(200);
@@ -258,8 +260,13 @@ describe('pipe API store and exports', () => {
     process.env.GHOST_MODE = 'demo';
     const demo = await app.inject({ method: 'GET', url: '/api/health' });
     expect(demo.json().ghost).toEqual({ mode: 'demo', acceptVisitorKeys: false });
+    process.env.GHOST_ACCEPT_VISITOR_KEYS = 'true';
+    const demoWithKeys = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(demoWithKeys.json().ghost).toEqual({ mode: 'byok', acceptVisitorKeys: true });
     if (previous === undefined) delete process.env.GHOST_MODE;
     else process.env.GHOST_MODE = previous;
+    if (previousAccept === undefined) delete process.env.GHOST_ACCEPT_VISITOR_KEYS;
+    else process.env.GHOST_ACCEPT_VISITOR_KEYS = previousAccept;
     await app.close();
   });
 

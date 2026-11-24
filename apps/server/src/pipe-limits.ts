@@ -62,8 +62,28 @@ export function exportHref(base: string, path: string): string {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-export function isGhostDemoOnly(): boolean {
-  return (process.env.GHOST_MODE || '').trim().toLowerCase() === 'demo';
+function parseBoolEnv(raw: string): boolean | undefined {
+  const value = raw.trim().toLowerCase();
+  if (value === '1' || value === 'true' || value === 'yes') return true;
+  if (value === '0' || value === 'false' || value === 'no') return false;
+  return undefined;
+}
+
+/**
+ * Whether this host forwards an optional visitor-supplied LLM key (BYOK).
+ * GHOST_ACCEPT_VISITOR_KEYS wins when set. Otherwise GHOST_MODE=demo
+ * disables forwarding; unset or "byok" allows it. There is never a
+ * host-owned key. The rule-based demo remains the default when no key
+ * is sent.
+ */
+export function acceptsVisitorKeys(env: NodeJS.ProcessEnv = process.env): boolean {
+  const explicit = parseBoolEnv(env.GHOST_ACCEPT_VISITOR_KEYS || '');
+  if (explicit !== undefined) return explicit;
+  return (env.GHOST_MODE || '').trim().toLowerCase() !== 'demo';
+}
+
+export function isGhostDemoOnly(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !acceptsVisitorKeys(env);
 }
 
 export function parseTrustProxy(

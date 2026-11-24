@@ -15,7 +15,8 @@ COPY --from=build /src/packages ./packages
 RUN npm ci --omit=dev && chown -R node:node /app
 USER node
 ENV PORT=7860
-ENV GHOST_MODE=byok
+ENV GHOST_MODE=demo
+ENV GHOST_ACCEPT_VISITOR_KEYS=true
 ENV TRUST_PROXY=1
 EXPOSE 7860
 CMD ["./node_modules/.bin/tsx", "apps/server/src/index.ts"]

@@ -239,8 +239,9 @@ export async function createApp(options: CreateAppOptions = {}) {
       const { buildPipeFromPrompt } = await import('./ghost.js');
 
       // Default is the free, rule-based demo. A user-supplied key is
-      // forwarded once to an allowlisted provider and never stored.
-      // GHOST_MODE=demo (hosted jury URL) refuses forwarding entirely.
+      // forwarded once to an allowlisted provider and never stored, unless
+      // this host is demo-only (GHOST_MODE=demo without
+      // GHOST_ACCEPT_VISITOR_KEYS=true).
       if (!apiKey || isGhostDemoOnly()) {
         const result = buildPipeFromPrompt(body.prompt);
         reply.code(200).send({

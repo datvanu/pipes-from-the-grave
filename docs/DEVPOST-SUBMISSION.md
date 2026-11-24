@@ -1,6 +1,6 @@
 # Devpost submission draft — Pipes from the Grave
 
-English draft for the Kiroween 2026 Devpost form. **Do not submit, create a Devpost account, or publish URLs from this file.** Fill the placeholders only after Kilian approves the public repo, the hosted demo, and the YouTube upload.
+English draft for the Kiroween 2026 Devpost form. **Do not submit this form or publish the YouTube video from this file.** Kilian submits on his Devpost account once the demo URL and video URL are filled in.
 
 Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the running demo-mode app). No extra features or metrics.
 
@@ -8,11 +8,11 @@ Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the ru
 
 | Field | Value |
 |---|---|
-| Repo URL | `{{REPO_URL}}` — public GitHub repo under `datvanu`, with `/.kiro` at the root and the MIT license visible in the About section. Not published yet. |
-| Demo URL | `{{DEMO_URL}}` — a running app the jury can use for free through 29 January 2027. Not deployed yet. No login; leave the private credentials field empty. If the host has a cold start, say so in “How to test.” |
+| Repo URL | https://github.com/datvanu/pipes-from-the-grave — public GitHub repo under `datvanu`, with `/.kiro` at the root and the MIT license visible in the About section. |
+| Demo URL | `{{DEMO_URL}}` — a running app the jury can use for free through 29 January 2027. Approved host: one Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)). Not deployed yet. No login; leave the private credentials field empty. The Free plan spins down after about 15 minutes idle; the next request takes about one minute to wake (Render shows a loading page). Say so in “How to test.” |
 | Video URL | `{{VIDEO_URL}}` — public YouTube video, under 3 minutes. See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). Not recorded yet. |
 
-Suggested demo path if the single-service host from [HOSTING.md](HOSTING.md) is approved: the Fastify process serves both the editor and `/api/*`.
+The Fastify process serves both the editor and `/api/*` on the same origin.
 
 ## Required items (from the official rules, as recorded in the 30 October 2026 plan)
 
@@ -20,7 +20,7 @@ Confirm each box before Kilian submits on Devpost (deadline **4 December 2026, 2
 
 - [ ] Project was started after 30 October 2026, 17:00 Europe/Berlin (this repo’s Kiro sessions begin 5 November 2026). No prior product code was copied in; third-party libraries are listed below and in the README.
 - [ ] **Category: Resurrection** (the other official choices are Frankenstein, Skeleton Crew, and Costume Contest; this project is entered in Resurrection).
-- [ ] Public **GitHub** repository (not GitLab or Bitbucket) at `{{REPO_URL}}`, with `/.kiro` at the repo root and **not** gitignored (only local overrides `.kiro/permissions.yaml` and `.kiro/settings/mcp.local.json` are ignored).
+- [x] Public **GitHub** repository (not GitLab or Bitbucket) at https://github.com/datvanu/pipes-from-the-grave, with `/.kiro` at the repo root and **not** gitignored (only local overrides `.kiro/permissions.yaml` and `.kiro/settings/mcp.local.json` are ignored). MIT license is visible in GitHub About.
 - [ ] Open-source **license file** in the repo (MIT, `LICENSE`) and shown in GitHub About.
 - [ ] Sources plus a README quick start so a judge can run or use the project.
 - [ ] **Video** under 3 minutes, public on **YouTube**, showing the project on the target device, with **no third-party brands** and **no copyrighted music** without permission.
@@ -71,7 +71,7 @@ A TypeScript npm-workspace monorepo:
 - `@pipes/web` — Vite, React, and React Flow editor (graveyard, ghost séance, inspector, séance debug).
 - `@pipes/mcp` — newline-delimited JSON-RPC MCP server (`tools/list`, `tools/call`) that prefers the live HTTP API.
 
-Local quick start is `npm install` and `npm run dev` (or `npm run dev:all`; UI on port 5173, API on 8787). There is a Dockerfile and a hosting note for a later jury URL; nothing from this repo has been deployed yet.
+Local quick start is `npm install` and `npm run dev` (or `npm run dev:all`; UI on port 5173, API on 8787). The jury demo is a single Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)); the URL is not live yet. After deploy, the same origin serves the editor and `/api/*`.
 
 ## How Kiro was used
 
@@ -108,15 +108,15 @@ Specs and steering paid off when several sessions had to stay on the same voice 
 
 ## What's next for Pipes from the Grave
 
-Publish the GitHub repository, host the jury demo (pending approval), and record the official video from the script. After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
+Host the jury demo on Render Free and record the official video from the script. After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
 
 ## How to test (for judges)
 
-1. Open `{{DEMO_URL}}`. If nobody has used the demo for a few minutes, the free host may take about one minute to wake. You should see the host’s loading page — please wait instead of refreshing right away.
+1. Open `{{DEMO_URL}}`. This is a Render Free web service. If nobody has used the demo for about 15 minutes, the host may take about one minute to wake. You should see Render’s loading page — please wait instead of refreshing right away.
 2. Click **Graveyard**, pick **Frontpage Digest**, click **Run**, and wait for Séance Output. This is the first proven path.
 3. Click **Ghost Séance**. Leave the key field empty. Use a prompt that the demo rules can parse, for example: “Fetch RSS from https://www.rfc-editor.org/rfcrss.xml then sort and keep the top 5”. Click Summon, check that the Fetch URL in the inspector has no trailing comma, then click Run. Optionally open `/p/<id>.json` or `.rss` from the footer. Those export links, and any server-saved pipe, last only until the free host sleeps; your browser draft and the Graveyard templates remain. Use **Download JSON** if you want a copy you can **Load JSON** later.
-The default Ghost is rule-based: it looks for simple keywords. You do not need a key. A personal key is optional, stays in your browser, and is never required to try the editor.
-4. No sign-in is required. A personal key is optional, stays in your browser, and is sent only to the provider you pick when you Summon. The hosted demo is in demo mode and does not forward visitor keys.
+The default Ghost is rule-based: it looks for simple keywords. You do not need a key.
+4. No sign-in is required. A personal key is optional: if you paste one, it stays in your browser and is sent only to the provider you pick when you Summon. It is never stored on the server and is never required to try the editor. There is no project-owned API key.
 
 To run from source: Node 20+, `npm install`, `npm run dev` (or `npm run dev:all`). See the README.
 

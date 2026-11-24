@@ -47,16 +47,20 @@ function loggerSink() {
 
 describe('Ghost BYOK', () => {
   const previousGhostMode = process.env.GHOST_MODE;
+  const previousAccept = process.env.GHOST_ACCEPT_VISITOR_KEYS;
 
   beforeEach(() => {
     rateLimiter.clear();
     delete process.env.GHOST_MODE;
+    delete process.env.GHOST_ACCEPT_VISITOR_KEYS;
   });
 
   afterEach(() => {
     rateLimiter.clear();
     if (previousGhostMode === undefined) delete process.env.GHOST_MODE;
     else process.env.GHOST_MODE = previousGhostMode;
+    if (previousAccept === undefined) delete process.env.GHOST_ACCEPT_VISITOR_KEYS;
+    else process.env.GHOST_ACCEPT_VISITOR_KEYS = previousAccept;
   });
 
   it('uses rule-based demo mode when no key is sent', async () => {
@@ -202,6 +206,35 @@ describe('Ghost BYOK', () => {
     expect(body.mode).toBe('demo');
     expect(body.fallbackReason).toMatch(/demo mode/i);
     expect(called).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    await app.close();
+  });
+
+  it('forwards a visitor key when GHOST_MODE is demo but GHOST_ACCEPT_VISITOR_KEYS is true', async () => {
+    process.env.GHOST_MODE = 'demo';
+    process.env.GHOST_ACCEPT_VISITOR_KEYS = 'true';
+    let seenAuth: string | undefined;
+    const llmFetch: typeof fetch = async (_input, init) => {
+      seenAuth = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(llmPipe) } }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+    const app = await createApp({ logger: false, llmFetch });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ghost',
+      headers: { 'x-ghost-llm-key': SECRET },
+      payload: { prompt: 'fetch rss about rust, sort, top 5', provider: 'openai' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.mode).toBe('llm');
+    expect(body.pipe.name).toBe('Rust Digest');
+    expect(seenAuth).toBe(`Bearer ${SECRET}`);
     expect(JSON.stringify(body)).not.toContain(SECRET);
     await app.close();
   });
