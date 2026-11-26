@@ -1,6 +1,6 @@
 # Devpost submission draft — Pipes from the Grave
 
-English draft for the Kiroween 2026 Devpost form. **Do not submit this form or publish the YouTube video from this file.** Kilian submits on his Devpost account once the demo URL and video URL are filled in.
+English draft for the Kiroween 2026 Devpost form. **Do not submit this form from this file.** Kilian submits on his Devpost account. The demo URL and public YouTube URL are filled in below.
 
 Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the running demo-mode app). No extra features or metrics.
 
@@ -10,7 +10,7 @@ Grounded in the current tree (README, `/.kiro`, `docs/KIRO-USAGE.md`, and the ru
 |---|---|
 | Repo URL | https://github.com/datvanu/pipes-from-the-grave — public GitHub repo under `datvanu`, with `/.kiro` at the root and the MIT license visible in the About section. |
 | Demo URL | https://pipes-from-the-grave.onrender.com — running on a Render Free web service in Frankfurt (see [HOSTING.md](HOSTING.md)). No login; leave the private credentials field empty. The Free plan spins down after about 15 minutes idle; the next request takes about one minute to wake (Render shows a loading page). Say so in “How to test.” |
-| Video URL | `{{VIDEO_URL}}` — public YouTube video, under 3 minutes. See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). A local 1080p draft (about 2:30) is ready for Kilian to upload; fill this after the public YouTube URL exists. |
+| Video URL | https://youtu.be/gAQpLGHkZBQ — public YouTube video, under 3 minutes (about 2:30). See [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md). |
 
 The Fastify process serves both the editor and `/api/*` on the same origin.
 
@@ -23,7 +23,7 @@ Confirm each box before Kilian submits on Devpost (deadline **4 December 2026, 2
 - [x] Public **GitHub** repository (not GitLab or Bitbucket) at https://github.com/datvanu/pipes-from-the-grave, with `/.kiro` at the repo root and **not** gitignored (only local overrides `.kiro/permissions.yaml` and `.kiro/settings/mcp.local.json` are ignored). MIT license is visible in GitHub About.
 - [ ] Open-source **license file** in the repo (MIT, `LICENSE`) and shown in GitHub About.
 - [ ] Sources plus a README quick start so a judge can run or use the project.
-- [ ] **Video** under 3 minutes, public on **YouTube**, showing the project on the target device, with **no third-party brands** and **no copyrighted music** without permission.
+- [x] **Video** under 3 minutes, public on **YouTube** (https://youtu.be/gAQpLGHkZBQ), showing the project on the target device, with **no third-party brands** and **no copyrighted music** without permission.
 - [x] **URL of a running app** (https://pipes-from-the-grave.onrender.com) that judges can try at no cost through the end of judging (29 January 2027). Login credentials, if any, go in Devpost’s non-public field — this app has no login.
 - [ ] Submission text in **English**.
 - [ ] Built with Kiro, plus the required **write-up of Kiro use** (see “How Kiro was used” below: CLI, custom agent file, hooks, specs, steering, MCP, property-based tests; no Powers).
@@ -100,7 +100,7 @@ Kiro generated the steering and specs, the engine, server/Ghost/MCP scaffolding,
 - A complete editor loop the jury can try: template or Ghost, run, inspect souls, export JSON and RSS, with no account and no key.
 - An MCP tool surface that matches the API, with tests for the tool list and a live `tools/call`.
 - Steering, specs, hook notes, and a custom agent committed under `/.kiro` at the repo root, plus an honest usage log of what Kiro did and what people fixed afterwards.
-- Property-based and unit tests around the engine, rate limits, Ghost prompts, and MCP (87 tests in the current workspace run).
+- Property-based and unit tests around the engine, rate limits, Ghost prompts, and MCP (117 tests in the current workspace run).
 
 ## What we learned
 
@@ -108,7 +108,7 @@ Specs and steering paid off when several sessions had to stay on the same voice 
 
 ## What's next for Pipes from the Grave
 
-The jury demo is live on Render Free. Record and upload the official video from the script (a draft MP4 is ready locally; the YouTube URL is still a placeholder). After that, a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
+The jury demo is live on Render Free, and the official video is public at https://youtu.be/gAQpLGHkZBQ. Next: a security review of the public API and the visitor-key header path, and only then any extra allowlisted providers. A hosted LLM key of our own is not planned.
 
 ## How to test (for judges)
 

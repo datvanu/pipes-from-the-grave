@@ -2,7 +2,7 @@
 
 Draft shooting script for the Kiroween 2026 Devpost video. **Target length: about 2:30, never over 2:45** (rule: under 3:00). English voice-over. Film the running app on the target device (the browser editor, plus a brief cut to Kiro CLI and the `/.kiro` tree).
 
-This is a draft only. Kilian records and uploads the YouTube video himself. Do not publish from this repo.
+The official public video is at https://youtu.be/gAQpLGHkZBQ. This file is the shooting script used for that recording.
 
 ## Constraints (read before filming)
 
