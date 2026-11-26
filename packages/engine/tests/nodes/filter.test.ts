@@ -17,8 +17,8 @@ describe('filterItems', () => {
           const config = { field: 'status', op: 'equals', value: status };
           const result = filterItems(config, { items });
           
-          // All results should match the filter
-          expect(result.items.every(i => i.status === status)).toBe(true);
+          // All results should match the filter (equals is case-insensitive)
+          expect(result.items.every(i => i.status.toLowerCase() === status.toLowerCase())).toBe(true);
           
           // Results should be subset of original
           expect(result.items.length).toBeLessThanOrEqual(items.length);
